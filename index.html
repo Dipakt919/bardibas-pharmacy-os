@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="ne">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bardibas Pharmacy OS</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="app">
+
+  <!-- Sidebar / Bottom nav -->
+  <nav class="nav">
+    <div class="brand">
+      <span class="brand-icon">+</span>
+      <span class="brand-text">Pharmacy OS</span>
+    </div>
+    <button class="nav-btn active" data-page="dashboard">Dashboard</button>
+    <button class="nav-btn" data-page="medicines">Medicines</button>
+    <button class="nav-btn" data-page="billing">Billing</button>
+    <button class="nav-btn" data-page="purchase">Purchase</button>
+    <button class="nav-btn" data-page="suppliers">Suppliers</button>
+    <button class="nav-btn" data-page="reports">Reports</button>
+    <button class="nav-btn" data-page="settings">Settings</button>
+  </nav>
+
+  <main class="main">
+
+    <!-- DASHBOARD -->
+    <section id="page-dashboard" class="page active">
+      <h1>Dashboard</h1>
+      <div class="stat-grid">
+        <div class="stat-card">
+          <div class="stat-label">Total Medicines</div>
+          <div class="stat-value" id="stat-total-medicines">0</div>
+        </div>
+        <div class="stat-card warn">
+          <div class="stat-label">Low Stock</div>
+          <div class="stat-value" id="stat-low-stock">0</div>
+        </div>
+        <div class="stat-card danger">
+          <div class="stat-label">Near Expiry (90 din)</div>
+          <div class="stat-value" id="stat-near-expiry">0</div>
+        </div>
+        <div class="stat-card good">
+          <div class="stat-label">Today's Sales</div>
+          <div class="stat-value" id="stat-today-sales">Rs. 0</div>
+        </div>
+      </div>
+
+      <div class="dash-row">
+        <div class="panel">
+          <h2>⚠ Low Stock Alert</h2>
+          <div id="dash-low-stock-list" class="alert-list"></div>
+        </div>
+        <div class="panel">
+          <h2>⏳ Near Expiry Alert</h2>
+          <div id="dash-near-expiry-list" class="alert-list"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- MEDICINES -->
+    <section id="page-medicines" class="page">
+      <div class="page-head">
+        <h1>Medicines / Stock</h1>
+        <button class="btn primary" id="btn-add-medicine">+ Add Medicine</button>
+      </div>
+
+      <input type="text" id="medicine-search" class="search-box" placeholder="Search medicine by name...">
+
+      <div class="table-wrap">
+        <table id="medicine-table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Generic</th>
+              <th>Batch No</th>
+              <th>Expiry</th>
+              <th>Qty</th>
+              <th>Purchase Rs.</th>
+              <th>Sell Rs.</th>
+              <th>Supplier</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="medicine-tbody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- BILLING -->
+    <section id="page-billing" class="page">
+      <h1>Billing / New Sale</h1>
+
+      <div class="billing-layout">
+        <div class="billing-left">
+          <input type="text" id="billing-search" class="search-box" placeholder="Medicine khojnu hos...">
+          <div id="billing-search-results" class="search-results"></div>
+
+          <div class="table-wrap">
+            <table id="cart-table">
+              <thead>
+                <tr><th>Medicine</th><th>Batch</th><th>Qty</th><th>Rate</th><th>Amount</th><th></th></tr>
+              </thead>
+              <tbody id="cart-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="billing-right">
+          <div class="panel">
+            <label>Customer Name (optional)</label>
+            <input type="text" id="billing-customer-name" placeholder="Customer naam">
+            <label>Phone (optional)</label>
+            <input type="text" id="billing-customer-phone" placeholder="Phone number">
+
+            <div class="bill-summary">
+              <div class="bill-row"><span>Subtotal</span><span id="bill-subtotal">Rs. 0</span></div>
+              <div class="bill-row"><span>Discount Rs.</span><input type="number" id="bill-discount" value="0" min="0"></div>
+              <div class="bill-row"><span>VAT (13%)</span><span id="bill-vat">Rs. 0</span></div>
+              <div class="bill-row total"><span>Total</span><span id="bill-total">Rs. 0</span></div>
+            </div>
+
+            <label>Payment Mode</label>
+            <select id="bill-payment-mode">
+              <option value="Cash">Cash</option>
+              <option value="Card">Card</option>
+              <option value="Credit">Credit / Udharo</option>
+            </select>
+
+            <button class="btn primary full" id="btn-complete-sale">Complete Sale</button>
+            <button class="btn full" id="btn-clear-cart">Clear Cart</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- PURCHASE -->
+    <section id="page-purchase" class="page">
+      <div class="page-head">
+        <h1>Purchase Entry</h1>
+      </div>
+      <p class="hint">Yo page bata nayaa medicine/batch pharmacy ma purchase (naya stock) gareko entry garnu hos.</p>
+      <button class="btn primary" id="btn-add-medicine-2">+ New Purchase / Add Medicine</button>
+
+      <div class="table-wrap">
+        <table id="purchase-table">
+          <thead>
+            <tr><th>Date</th><th>Medicine</th><th>Batch</th><th>Qty</th><th>Purchase Rs.</th><th>Supplier</th></tr>
+          </thead>
+          <tbody id="purchase-tbody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- SUPPLIERS -->
+    <section id="page-suppliers" class="page">
+      <div class="page-head">
+        <h1>Suppliers</h1>
+        <button class="btn primary" id="btn-add-supplier">+ Add Supplier</button>
+      </div>
+      <div class="table-wrap">
+        <table id="supplier-table">
+          <thead><tr><th>Name</th><th>Phone</th><th>Address</th><th>PAN</th><th>Due Rs.</th><th></th></tr></thead>
+          <tbody id="supplier-tbody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- REPORTS -->
+    <section id="page-reports" class="page">
+      <h1>Reports</h1>
+
+      <div class="report-tabs">
+        <button class="report-tab-btn active" data-tab="sales">Sales Report</button>
+        <button class="report-tab-btn" data-tab="stock">Stock Report</button>
+        <button class="report-tab-btn" data-tab="expiry">Expiry Report</button>
+      </div>
+
+      <div id="report-sales" class="report-tab active">
+        <div class="filter-row">
+          <label>From <input type="date" id="sales-from"></label>
+          <label>To <input type="date" id="sales-to"></label>
+          <button class="btn" id="btn-filter-sales">Filter</button>
+        </div>
+        <div class="stat-grid small">
+          <div class="stat-card"><div class="stat-label">Total Sales</div><div class="stat-value" id="report-total-sales">Rs. 0</div></div>
+          <div class="stat-card"><div class="stat-label">Total Invoices</div><div class="stat-value" id="report-total-invoices">0</div></div>
+          <div class="stat-card good"><div class="stat-label">Est. Profit</div><div class="stat-value" id="report-total-profit">Rs. 0</div></div>
+        </div>
+        <div class="table-wrap">
+          <table id="sales-report-table">
+            <thead><tr><th>Invoice#</th><th>Date</th><th>Customer</th><th>Items</th><th>Total</th><th>Payment</th></tr></thead>
+            <tbody id="sales-report-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div id="report-stock" class="report-tab">
+        <div class="table-wrap">
+          <table id="stock-report-table">
+            <thead><tr><th>Medicine</th><th>Batch</th><th>Qty</th><th>Stock Value (purchase)</th></tr></thead>
+            <tbody id="stock-report-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div id="report-expiry" class="report-tab">
+        <div class="table-wrap">
+          <table id="expiry-report-table">
+            <thead><tr><th>Medicine</th><th>Batch</th><th>Expiry Date</th><th>Days Left</th><th>Qty</th></tr></thead>
+            <tbody id="expiry-report-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- SETTINGS -->
+    <section id="page-settings" class="page">
+      <h1>Pharmacy Settings</h1>
+      <div class="panel narrow">
+        <label>Pharmacy Name</label>
+        <input type="text" id="set-name">
+        <label>Address</label>
+        <input type="text" id="set-address">
+        <label>DDA License Number</label>
+        <input type="text" id="set-dda">
+        <label>Pharmacist Registration No.</label>
+        <input type="text" id="set-pharmacist-reg">
+        <label>PAN / VAT Number</label>
+        <input type="text" id="set-pan">
+        <label>Contact Number</label>
+        <input type="text" id="set-contact">
+        <label>Low Stock Alert Threshold (qty)</label>
+        <input type="number" id="set-low-stock-threshold" value="10">
+        <label>Near Expiry Alert (days)</label>
+        <input type="number" id="set-expiry-days" value="90">
+        <button class="btn primary full" id="btn-save-settings">Save Settings</button>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<!-- MEDICINE MODAL -->
+<div id="modal-medicine" class="modal-overlay">
+  <div class="modal">
+    <h2 id="medicine-modal-title">Add Medicine</h2>
+    <input type="hidden" id="med-id">
+    <label>Medicine Name *</label>
+    <input type="text" id="med-name">
+    <label>Generic Name</label>
+    <input type="text" id="med-generic">
+    <label>Category</label>
+    <select id="med-category">
+      <option>Tablet</option><option>Syrup</option><option>Capsule</option>
+      <option>Injection</option><option>Ointment</option><option>Drops</option><option>Other</option>
+    </select>
+    <label>Batch Number *</label>
+    <input type="text" id="med-batch">
+    <label>Expiry Date *</label>
+    <input type="date" id="med-expiry">
+    <label>Quantity *</label>
+    <input type="number" id="med-qty" min="0">
+    <label>Purchase Price (per unit) *</label>
+    <input type="number" id="med-purchase-price" min="0" step="0.01">
+    <label>Selling Price (per unit) *</label>
+    <input type="number" id="med-sell-price" min="0" step="0.01">
+    <label>Supplier</label>
+    <select id="med-supplier"><option value="">-- None --</option></select>
+    <div class="modal-actions">
+      <button class="btn" id="btn-cancel-medicine">Cancel</button>
+      <button class="btn primary" id="btn-save-medicine">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- SUPPLIER MODAL -->
+<div id="modal-supplier" class="modal-overlay">
+  <div class="modal">
+    <h2>Add Supplier</h2>
+    <label>Name *</label>
+    <input type="text" id="sup-name">
+    <label>Phone</label>
+    <input type="text" id="sup-phone">
+    <label>Address</label>
+    <input type="text" id="sup-address">
+    <label>PAN</label>
+    <input type="text" id="sup-pan">
+    <label>Due Amount Rs.</label>
+    <input type="number" id="sup-due" value="0">
+    <div class="modal-actions">
+      <button class="btn" id="btn-cancel-supplier">Cancel</button>
+      <button class="btn primary" id="btn-save-supplier">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- INVOICE MODAL -->
+<div id="modal-invoice" class="modal-overlay">
+  <div class="modal invoice-modal">
+    <div id="invoice-print-area"></div>
+    <div class="modal-actions">
+      <button class="btn" id="btn-close-invoice">Close</button>
+      <button class="btn primary" id="btn-print-invoice">Print</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
