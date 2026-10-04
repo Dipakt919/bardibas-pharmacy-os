@@ -153,7 +153,7 @@ function genSku(name, cat) {
 function catalogOf(m) {
   return { name: m.name, sku: m.sku || '', barcode: m.barcode || '', generic: m.generic || '',
     manufacturer: m.manufacturer || '', category: m.category || 'Tablet', unit: m.unit || 'Strip',
-    brand: m.brand || '', active: m.active !== false, drugClass: m.drugClass || 'C', vat: m.vat || 'exempt', reorderLevel: m.reorderLevel ?? '', rack: m.rack || '' };
+    brand: m.brand || '', active: m.active !== false, image: m.image || '', storage: m.storage || '', controlled: !!m.controlled, packSize: m.packSize || '', maxStock: m.maxStock ?? '', tags: m.tags || '', notes: m.notes || '', drugClass: m.drugClass || 'C', vat: m.vat || 'exempt', reorderLevel: m.reorderLevel ?? '', rack: m.rack || '' };
 }
 
 /* ---- Products: grouping, filters, tabs ---- */
@@ -192,7 +192,7 @@ function productFilters() {
     if (!inactive && !g.active) return false;
     if (cat && g.p.category !== cat) return false;
     if (st && (st === 'attn' ? g.status === 'in' : g.status !== st)) return false;
-    return !q || g.batches.some(m => [m.name, m.sku, m.barcode, m.generic, m.manufacturer, m.brand].some(x => String(x || '').toLowerCase().includes(q)));
+    return !q || g.batches.some(m => [m.name, m.sku, m.barcode, m.generic, m.manufacturer, m.brand, m.tags].some(x => String(x || '').toLowerCase().includes(q)));
   });
 }
 
@@ -239,7 +239,8 @@ function renderMedicineTable() {
     return `<tr class="${cls}">
       <td class="sel-col"><input type="checkbox" data-sel="${k}" ${selected.has(g.key) ? 'checked' : ''}></td>
       <td>${esc(g.p.sku || '-')}</td>
-      <td>${esc(g.name)}<div class="sub">${esc(g.p.generic || '')}${g.batches.length > 1 ? ' · ' + g.batches.length + ' batches' : ''}</div></td>
+      <td><div class="pcell">${avatarHtml(g.name, g.p.image)}<div><div class="pname">${esc(g.name)}</div><div class="sub">${esc(g.p.generic || '')}${g.batches.length > 1 ? ' · ' + g.batches.length + ' batches' : ''}</div>
+        <div class="chips">${g.p.drugClass === 'A' ? '<span class="chip rx">Rx</span>' : ''}${g.p.controlled ? '<span class="chip ctl">Controlled</span>' : ''}${/^(Cool|Freezer)/.test(g.p.storage || '') ? '<span class="chip cold">❄ Cold</span>' : ''}</div></div></div></td>
       <td>${esc(g.p.category || '-')}</td><td>${esc(g.p.brand || '-')}</td><td>${esc(g.p.rack || 'Unassigned')}</td>
       <td>${rs(r.purchasePrice)}</td><td>${rs(r.sellPrice)}</td>
       <td class="${g.status === 'in' ? '' : 'stock-bad'}">${g.status === 'in' ? '' : '⚠ '}${g.qty}</td>
@@ -318,12 +319,13 @@ function productAction(act, key) {
       <div><span>Category</span>${esc(p.category || '-')}</div><div><span>Brand</span>${esc(p.brand || '-')}</div>
       <div><span>Unit</span>${esc(p.unit || '-')}</div><div><span>Rack</span>${esc(p.rack || 'Unassigned')}</div>
       <div><span>Class</span>${esc(p.drugClass || 'C')}</div><div><span>VAT</span>${p.vat === '13' ? '13%' : 'Exempt'}</div>
-      <div><span>Total stock</span>${g.qty}</div><div><span>Reorder level</span>${g.reorder}</div></div>
+      <div><span>Storage</span>${esc(p.storage || '-')}</div><div><span>Pack size</span>${esc(p.packSize || '-')}</div><div><span>Controlled</span>${p.controlled ? 'Yes' : 'No'}</div><div><span>Max stock</span>${p.maxStock === '' || p.maxStock == null ? '-' : p.maxStock}</div>
+      <div style="grid-column:1/-1"><span>Notes / tags</span>${esc(p.notes || '-')} ${p.tags ? '(' + esc(p.tags) + ')' : ''}</div><div><span>Total stock</span>${g.qty}</div><div><span>Reorder level</span>${g.reorder}</div></div>
       <h2 style="margin-top:14px">Batches</h2>
       <div class="table-wrap"><table style="min-width:480px"><thead><tr><th>Batch</th><th>Expiry</th><th>Qty</th><th>Cost</th><th>MRP</th><th>Sell</th><th>Supplier</th></tr></thead><tbody>${rows}</tbody></table></div>`);
   }
   if (act === 'label') {
-    $('print-area').innerHTML = `<div class="plabel"><b>${esc(g.name)}</b><br>SKU: ${esc(p.sku || '-')}${p.barcode ? '<br>Barcode: ' + esc(p.barcode) : ''}<br>Batch ${esc(r.batch)} | Exp ${esc(r.expiry)}<br><b>MRP ${rs(mrpOf(r))}</b><br><small>${esc(settings.name)}</small></div>`;
+    $('print-area').innerHTML = `<div class="plabel"><b>${esc(g.name)}</b><br>SKU: ${esc(p.sku || '-')}${p.barcode ? '<br>Barcode: ' + esc(p.barcode) : ''}<br>Batch ${esc(r.batch)} | Exp ${esc(r.expiry)}${p.storage ? '<br>' + esc(p.storage) : ''}${p.notes ? '<br><i>' + esc(p.notes) + '</i>' : ''}<br><b>MRP ${rs(mrpOf(r))}</b><br><small>${esc(settings.name)}</small></div>`;
     document.body.classList.add('printing');
     const done = () => { document.body.classList.remove('printing'); window.removeEventListener('afterprint', done); };
     window.addEventListener('afterprint', done); return window.print();
@@ -449,7 +451,7 @@ function renderInsights() {
   reorderList = g.map(p => {
     const s = stats.get(p.key) || { s30: 0, s90: 0, last: 0 }, cover = s.s30 ? p.qty / (s.s30 / 30) : Infinity;
     const need = p.status !== 'in' || cover < 14;
-    return { p, s, cover, need, suggest: Math.max(Math.max(p.reorder * 2, Math.ceil(s.s30 * 1.5)) - p.qty, 1) };
+    return { p, s, cover, need, suggest: Math.max(Math.max(+p.p.maxStock || p.reorder * 2, Math.ceil(s.s30 * 1.5)) - p.qty, 1) };
   }).filter(x => x.need).sort((a, b) => a.cover - b.cover);
   const dead = g.filter(p => p.qty > 0 && !(stats.get(p.key)?.s90)).map(p => ({ p, v: p.batches.reduce((a, b) => a + b.qty * b.purchasePrice, 0), last: stats.get(p.key)?.last }))
     .sort((a, b) => b.v - a.v);
@@ -474,6 +476,86 @@ $('in-export').addEventListener('click', () => exportTable('reorder_' + todayISO
 function renderExtraTab() {
   ({ adjust: renderAdjust, stocktake: renderStockTake, locations: renderLocations, insights: renderInsights })[ptab]?.();
 }
+
+
+/* ---- Advanced product form ---- */
+let medImage = '', addAnother = false;
+const AV_COLORS = ['#1D9E75', '#3B6FB6', '#BA7517', '#8E5BB5', '#C0392B', '#2A8C9E', '#6B7A2B'];
+function avatarHtml(name, img, cls) {
+  if (img) return `<img class="avatar ${cls || ''}" src="${img}" alt="">`;
+  let h = 0; for (const c of name) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return `<span class="avatar ${cls || ''}" style="background:${AV_COLORS[h % AV_COLORS.length]}">${esc((name.trim()[0] || '?').toUpperCase())}</span>`;
+}
+function setMTab(t) {
+  document.querySelectorAll('.mtab-btn').forEach(b => b.classList.toggle('active', b.dataset.mtab === t));
+  document.querySelectorAll('.mtab').forEach(p => p.classList.toggle('active', p.id === 'mtab-' + t));
+}
+document.querySelectorAll('.mtab-btn').forEach(b => b.addEventListener('click', () => setMTab(b.dataset.mtab)));
+
+function updatePreview() {
+  const n = val('med-name') || 'Product name', s = numVal('med-sell-price'), p = numVal('med-purchase-price');
+  $('pv-avatar').innerHTML = avatarHtml(n, medImage, 'lg');
+  $('pv-name').textContent = n;
+  $('pv-sub').textContent = [val('med-generic'), $('med-category').value, val('med-packsize')].filter(Boolean).join(' · ');
+  $('pv-price').textContent = isNaN(s) ? 'Rs. -' : rs(s);
+  $('pv-margin').textContent = (!isNaN(s) && !isNaN(p) && s > 0) ? 'Margin ' + ((s - p) / s * 100).toFixed(1) + '%' : '';
+}
+$('modal-medicine').addEventListener('input', e => { e.target.classList.remove('invalid'); updatePreview(); });
+$('modal-medicine').addEventListener('change', updatePreview);
+
+function jumpToMissing() {
+  document.querySelectorAll('#modal-medicine .invalid').forEach(e => e.classList.remove('invalid'));
+  const order = [['general', ['med-name']], ['pricing', ['med-mrp', 'med-purchase-price', 'med-sell-price']], ['stock', ['med-batch', 'med-expiry', 'med-qty']]];
+  const text = ['med-name', 'med-batch', 'med-expiry']; let first = true;
+  order.forEach(([tab, ids]) => ids.forEach(id => {
+    const bad = text.includes(id) ? !$(id).value.trim() : isNaN(parseFloat($(id).value));
+    if (!bad) return;
+    $(id).classList.add('invalid');
+    if (first) { setMTab(tab); $(id).focus(); first = false; }
+  }));
+  showToast('Rato border bhayeko required (*) field bharnu hos');
+}
+
+$('med-image').addEventListener('change', e => {
+  const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+  const img = new Image(), url = URL.createObjectURL(f);
+  img.onload = () => {
+    const c = document.createElement('canvas'); c.width = c.height = 96;
+    const s = Math.min(img.width, img.height);
+    c.getContext('2d').drawImage(img, (img.width - s) / 2, (img.height - s) / 2, s, s, 0, 0, 96, 96);
+    medImage = c.toDataURL('image/jpeg', 0.7); URL.revokeObjectURL(url);
+    $('med-img-wrap').innerHTML = `<img src="${medImage}" alt="">`; updatePreview();
+  };
+  img.src = url;
+});
+$('med-img-clear').addEventListener('click', () => { medImage = ''; $('med-img-wrap').innerHTML = ''; updatePreview(); });
+
+$('btn-gen-sku').addEventListener('click', () => {
+  if (!val('med-name')) return showToast('Pahile product naam halnu hos');
+  $('med-sku').value = genSku(val('med-name'), $('med-category').value);
+});
+function ean13() {
+  let d;
+  do {
+    d = '200' + String(Math.floor(Math.random() * 1e9)).padStart(9, '0');
+    let s = 0; for (let i = 0; i < 12; i++) s += +d[i] * (i % 2 ? 3 : 1);
+    d += (10 - s % 10) % 10;
+  } while (medicines.some(m => m.barcode === d));
+  return d;
+}
+$('btn-gen-barcode').addEventListener('click', () => { $('med-barcode').value = ean13(); });
+
+document.querySelectorAll('[data-markup]').forEach(b => b.addEventListener('click', () => {
+  const p = numVal('med-purchase-price'), mrp = numVal('med-mrp');
+  if (isNaN(p)) return showToast('Pahile purchase price halnu hos');
+  let s = Math.round(p * (1 + b.dataset.markup / 100) * 100) / 100;
+  if (!isNaN(mrp) && s > mrp) s = mrp;
+  $('med-sell-price').value = s; updateMargin(); updatePreview();
+}));
+document.querySelectorAll('[data-addm]').forEach(b => b.addEventListener('click', () => {
+  const d = new Date(); d.setMonth(d.getMonth() + +b.dataset.addm); $('med-expiry').value = localISO(d);
+}));
+$('btn-save-add').addEventListener('click', () => { addAnother = true; $('btn-save-medicine').click(); });
 
 /* ---- Categories / Brands / Units ---- */
 const CAT = {
@@ -551,7 +633,11 @@ function fillMedicineForm(m) {
   $('med-sell-price').value = m.sellPrice ?? '';
   populateSupplierDropdown();
   $('med-supplier').value = m.supplierId || '';
-  updateMargin();
+  medImage = m.image || ''; $('med-img-wrap').innerHTML = medImage ? `<img src="${medImage}" alt="">` : '';
+  $('med-storage').value = m.storage || ''; $('med-controlled').checked = !!m.controlled; $('med-packsize').value = m.packSize || '';
+  $('med-maxstock').value = m.maxStock ?? ''; $('med-tags').value = m.tags || ''; $('med-notes').value = m.notes || '';
+  document.querySelectorAll('#modal-medicine .invalid').forEach(e => e.classList.remove('invalid'));
+  setMTab('general'); updateMargin(); updatePreview();
 }
 
 function openAddMedicine() {
@@ -559,6 +645,7 @@ function openAddMedicine() {
   $('medicine-modal-title').textContent = 'Add New Product';
   fillMedicineForm({ category: 'Tablet', unit: 'Strip', drugClass: 'C', vat: 'exempt' });
   $('med-expiry').min = todayISO();
+  $('btn-save-add').style.display = '';
   openModal('modal-medicine');
 }
 
@@ -569,6 +656,7 @@ window.openEditMedicine = function (id) {
   $('medicine-modal-title').textContent = 'Edit Medicine / Batch';
   $('med-expiry').min = '';
   fillMedicineForm(m);
+  $('btn-save-add').style.display = 'none';
   openModal('modal-medicine');
 };
 
@@ -585,11 +673,12 @@ $('btn-add-medicine').addEventListener('click', openAddMedicine);
 $('btn-cancel-medicine').addEventListener('click', () => closeModal('modal-medicine'));
 
 $('btn-save-medicine').addEventListener('click', () => {
+  const again = addAnother, wasEditing = !!editingMedicineId; addAnother = false;
   const name = val('med-name'), batch = val('med-batch'), expiry = $('med-expiry').value;
   const qty = numVal('med-qty'), purchasePrice = numVal('med-purchase-price');
   const sellPrice = numVal('med-sell-price'), mrp = numVal('med-mrp');
   if (!name || !batch || !expiry || [qty, purchasePrice, sellPrice, mrp].some(isNaN)) {
-    showToast('Kripaya sabai required (*) field bharnu hos'); return;
+    jumpToMissing(); return;
   }
   if (qty < 0 || purchasePrice < 0 || sellPrice <= 0 || mrp <= 0) { showToast('Qty / price galat xa'); return; }
   if (sellPrice > mrp) { showToast('Selling price MRP bhanda badhi hunu hudaina'); return; }
@@ -614,7 +703,9 @@ $('btn-save-medicine').addEventListener('click', () => {
   const catalog = {
     name, sku, barcode, generic: val('med-generic'), manufacturer: val('med-manufacturer'), category,
     unit: $('med-unit').value, brand: $('med-brand').value, drugClass: $('med-class').value, vat: $('med-vat').value,
-    reorderLevel: re === '' ? '' : parseFloat(re), rack: val('med-rack')
+    reorderLevel: re === '' ? '' : parseFloat(re), rack: val('med-rack'),
+    image: medImage, storage: $('med-storage').value, controlled: $('med-controlled').checked, packSize: val('med-packsize'),
+    maxStock: $('med-maxstock').value === '' ? '' : parseFloat($('med-maxstock').value), tags: val('med-tags'), notes: val('med-notes')
   };
   const batchData = { batch, expiry, qty, purchasePrice, mrp, sellPrice, supplierId: $('med-supplier').value || null };
 
@@ -637,6 +728,7 @@ $('btn-save-medicine').addEventListener('click', () => {
   closeModal('modal-medicine');
   renderMedicineTable($('medicine-search').value);
   renderPurchaseTable();
+  if (again && !wasEditing) openAddMedicine();
 });
 
 /* ============ NEW PURCHASE (multi-item supplier bill) ============ */
@@ -1074,6 +1166,7 @@ document.getElementById('btn-complete-sale').addEventListener('click', () => {
   const mode = document.getElementById('bill-payment-mode').value;
   const customerName = document.getElementById('billing-customer-name').value.trim();
   if (mode === 'Credit' && !customerName) { showToast('Udharo ko lagi customer ko naam chahiyo'); return; }
+  if (cart.some(c => medicines.find(x => x.id === c.medId)?.controlled) && !customerName) { showToast('Controlled medicine ko lagi customer ko naam chahiyo'); return; }
   for (const c of cart) {
     const m = medicines.find(x => x.id === c.medId);
     if (!m || m.qty < c.qty) { showToast(`${c.name} ko stock sufficient xaina`); return; }

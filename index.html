@@ -415,38 +415,76 @@
 <div id="modal-medicine" class="modal-overlay">
   <div class="modal wide">
     <h2 id="medicine-modal-title">Add New Product</h2>
-    <div class="form-title">Product Information</div>
-    <div class="form-grid">
-      <div class="full"><label>Medicine Name * (brand + strength)</label><input type="text" id="med-name" placeholder="jastai Paracetamol 500mg"></div>
-      <div><label>Generic / Salt Name</label><input type="text" id="med-generic"></div>
-      <div><label>Manufacturer / Company</label><input type="text" id="med-manufacturer"></div>
-      <div><label>Brand</label><select id="med-brand"></select></div>
-      <div><label>Category</label>
-        <select id="med-category"><option>Tablet</option><option>Syrup</option><option>Capsule</option><option>Injection</option><option>Ointment</option><option>Drops</option><option>Other</option></select></div>
-      <div><label>Selling Unit</label>
-        <select id="med-unit"><option>Strip</option><option>Tablet</option><option>Capsule</option><option>Bottle</option><option>Vial</option><option>Tube</option><option>Sachet</option><option>Box</option><option>Piece</option></select></div>
-      <div><label>SKU (blank xa bhane auto banchha)</label><input type="text" id="med-sku" placeholder="PCM-TAB-500"></div>
-      <div><label>Manufacturing Barcode</label><input type="text" id="med-barcode" placeholder="scan garnu hos"></div>
-      <div><label>DDA Dispensing Class</label>
-        <select id="med-class"><option value="A">A - Prescription (Rx) matra</option><option value="B">B - Pharmacist ko salah</option><option value="C" selected>C - OTC</option></select></div>
-      <div><label>VAT</label>
-        <select id="med-vat"><option value="exempt">VAT Exempt (aushadhi)</option><option value="13">VAT 13% lagne</option></select></div>
-      <div><label>Reorder Level (min stock)</label><input type="number" id="med-reorder" min="0" placeholder="default: settings"></div>
-      <div><label>Rack / Shelf Location</label><input type="text" id="med-rack" placeholder="jastai A-2"></div>
+
+    <div class="pv-card">
+      <span id="pv-avatar"></span>
+      <div class="pv-text"><div id="pv-name" class="pv-name"></div><div id="pv-sub" class="sub"></div></div>
+      <div class="pv-right"><div id="pv-price" class="pv-price"></div><div id="pv-margin" class="sub"></div></div>
     </div>
-    <div class="form-title">Batch &amp; Stock</div>
-    <div class="form-grid">
-      <div><label>Batch Number *</label><input type="text" id="med-batch"></div>
-      <div><label>Expiry Date *</label><input type="date" id="med-expiry"></div>
-      <div><label>Quantity (opening stock) *</label><input type="number" id="med-qty" min="0"></div>
-      <div><label>MRP (per unit, VAT sahit) *</label><input type="number" id="med-mrp" min="0" step="0.01"></div>
-      <div><label>Purchase Price (per unit) *</label><input type="number" id="med-purchase-price" min="0" step="0.01"></div>
-      <div><label>Selling Price (per unit) *</label><input type="number" id="med-sell-price" min="0" step="0.01"></div>
-      <div class="full"><label>Supplier</label><select id="med-supplier"><option value="">-- None --</option></select></div>
+
+    <div class="mtabs">
+      <button type="button" class="mtab-btn active" data-mtab="general">General</button>
+      <button type="button" class="mtab-btn" data-mtab="pricing">Pricing &amp; Tax</button>
+      <button type="button" class="mtab-btn" data-mtab="pharmacy">Pharmacy</button>
+      <button type="button" class="mtab-btn" data-mtab="stock">Stock &amp; Batch</button>
     </div>
-    <div id="med-margin" class="margin-note"></div>
+
+    <div id="mtab-general" class="mtab active">
+      <div class="form-grid">
+        <div class="full"><label>Medicine Name * (brand + strength)</label><input type="text" id="med-name" placeholder="jastai Paracetamol 500mg"></div>
+        <div><label>Generic / Salt Name</label><input type="text" id="med-generic"></div>
+        <div><label>Manufacturer / Company</label><input type="text" id="med-manufacturer"></div>
+        <div><label>Brand</label><select id="med-brand"></select></div>
+        <div><label>Category</label><select id="med-category"></select></div>
+        <div><label>Selling Unit</label><select id="med-unit"></select></div>
+        <div><label>Pack size (jastai 10x10, 100ml)</label><input type="text" id="med-packsize"></div>
+        <div><label>SKU (blank xa bhane auto)</label><div class="input-row"><input type="text" id="med-sku" placeholder="PCM-TAB-500"><button type="button" class="btn sm" id="btn-gen-sku">Auto</button></div></div>
+        <div><label>Barcode</label><div class="input-row"><input type="text" id="med-barcode" placeholder="scan garnu hos"><button type="button" class="btn sm" id="btn-gen-barcode">Generate</button></div></div>
+        <div class="full"><label>Search tags / alternate names (comma le chhutyaunu hos)</label><input type="text" id="med-tags" placeholder="jastai: pcm, fever, dolo"></div>
+        <div class="full"><label>Product photo</label>
+          <div class="input-row"><span id="med-img-wrap" class="img-wrap"></span><input type="file" id="med-image" accept="image/*"><button type="button" class="btn sm" id="med-img-clear">Remove</button></div></div>
+      </div>
+    </div>
+
+    <div id="mtab-pricing" class="mtab">
+      <div class="form-grid">
+        <div><label>MRP (per unit, VAT sahit) *</label><input type="number" id="med-mrp" min="0" step="0.01"></div>
+        <div><label>Purchase Price (per unit) *</label><input type="number" id="med-purchase-price" min="0" step="0.01"></div>
+        <div><label>Selling Price (per unit) *</label><input type="number" id="med-sell-price" min="0" step="0.01"></div>
+        <div><label>VAT</label><select id="med-vat"><option value="exempt">VAT Exempt (aushadhi)</option><option value="13">VAT 13% lagne</option></select></div>
+        <div class="full"><label>Quick markup (purchase price ma % thapera selling price banaune)</label>
+          <div class="chip-row"><button type="button" class="chip-btn" data-markup="10">+10%</button><button type="button" class="chip-btn" data-markup="15">+15%</button><button type="button" class="chip-btn" data-markup="20">+20%</button><button type="button" class="chip-btn" data-markup="30">+30%</button><span class="sub">MRP bhanda mathi jadaina</span></div></div>
+      </div>
+      <div id="med-margin" class="margin-note"></div>
+    </div>
+
+    <div id="mtab-pharmacy" class="mtab">
+      <div class="form-grid">
+        <div><label>DDA Dispensing Class</label>
+          <select id="med-class"><option value="A">A - Prescription (Rx) matra</option><option value="B">B - Pharmacist ko salah</option><option value="C" selected>C - OTC</option></select></div>
+        <div><label>Storage condition</label>
+          <select id="med-storage"><option value="">-- Select --</option><option>Room temperature</option><option>Below 25°C</option><option>Cool (2-8°C)</option><option>Freezer</option><option>Protect from light</option></select></div>
+        <div class="full"><label class="check-row"><input type="checkbox" id="med-controlled"> Controlled / narcotic medicine (bechda customer ko naam anibarya)</label></div>
+        <div class="full"><label>Dosage / counselling note (label ma print huncha)</label><input type="text" id="med-notes" placeholder="jastai: 1 tablet din ma 3 patak, khana pachhi"></div>
+      </div>
+    </div>
+
+    <div id="mtab-stock" class="mtab">
+      <div class="form-grid">
+        <div><label>Batch Number *</label><input type="text" id="med-batch"></div>
+        <div><label>Expiry Date *</label><input type="date" id="med-expiry">
+          <div class="chip-row"><button type="button" class="chip-btn" data-addm="6">+6m</button><button type="button" class="chip-btn" data-addm="12">+1y</button><button type="button" class="chip-btn" data-addm="24">+2y</button><button type="button" class="chip-btn" data-addm="36">+3y</button></div></div>
+        <div><label>Quantity (opening stock) *</label><input type="number" id="med-qty" min="0"></div>
+        <div><label>Supplier</label><select id="med-supplier"><option value="">-- None --</option></select></div>
+        <div><label>Reorder Level (min stock)</label><input type="number" id="med-reorder" min="0" placeholder="default: settings"></div>
+        <div><label>Max stock (reorder suggestion target)</label><input type="number" id="med-maxstock" min="0"></div>
+        <div class="full"><label>Rack / Shelf Location</label><input type="text" id="med-rack" placeholder="jastai A-2"></div>
+      </div>
+    </div>
+
     <div class="modal-actions">
       <button class="btn" id="btn-cancel-medicine">Cancel</button>
+      <button class="btn" id="btn-save-add">Save &amp; add another</button>
       <button class="btn primary" id="btn-save-medicine">Save</button>
     </div>
   </div>
