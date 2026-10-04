@@ -65,7 +65,7 @@
     <section id="page-medicines" class="page">
       <div class="page-head">
         <h1>Medicines / Stock</h1>
-        <button class="btn primary" id="btn-add-medicine">+ Add Medicine</button>
+        <button class="btn primary" id="btn-add-medicine">+ Add New Product</button>
       </div>
 
       <input type="text" id="medicine-search" class="search-box" placeholder="Search by name, SKU, or barcode...">
@@ -144,8 +144,8 @@
       <div class="page-head">
         <h1>Purchase Entry</h1>
       </div>
-      <p class="hint">Yo page bata nayaa medicine/batch pharmacy ma purchase (naya stock) gareko entry garnu hos.</p>
-      <button class="btn primary" id="btn-add-medicine-2">+ New Purchase / Add Medicine</button>
+      <p class="hint">Pahile thapisakeko product ko naya batch/stock yaha purchase entry garnu hos. Bilkul nayaa product thapna "Medicines" page ma jaanu hos.</p>
+      <button class="btn primary" id="btn-new-purchase">+ New Purchase</button>
 
       <div class="table-wrap">
         <table id="purchase-table">
@@ -279,6 +279,34 @@
     <div class="modal-actions">
       <button class="btn" id="btn-cancel-medicine">Cancel</button>
       <button class="btn primary" id="btn-save-medicine">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- PURCHASE MODAL (restock existing product) -->
+<div id="modal-purchase" class="modal-overlay">
+  <div class="modal">
+    <h2>New Purchase (Restock)</h2>
+    <label>Select Product *</label>
+    <select id="pur-product">
+      <option value="">-- Select existing product --</option>
+    </select>
+    <p class="hint" style="margin-top:6px;">Product list ma napaye, pahile "Medicines" page bata "+ Add New Product" garnu hos.</p>
+    <label>Batch Number *</label>
+    <input type="text" id="pur-batch">
+    <label>Expiry Date *</label>
+    <input type="date" id="pur-expiry">
+    <label>Quantity *</label>
+    <input type="number" id="pur-qty" min="0">
+    <label>Purchase Price (per unit) *</label>
+    <input type="number" id="pur-purchase-price" min="0" step="0.01">
+    <label>Selling Price (per unit) *</label>
+    <input type="number" id="pur-sell-price" min="0" step="0.01">
+    <label>Supplier</label>
+    <select id="pur-supplier"><option value="">-- None --</option></select>
+    <div class="modal-actions">
+      <button class="btn" id="btn-cancel-purchase">Cancel</button>
+      <button class="btn primary" id="btn-save-purchase">Save Purchase</button>
     </div>
   </div>
 </div>

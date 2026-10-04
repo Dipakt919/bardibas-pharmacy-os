@@ -153,9 +153,26 @@ function renderMedicineTable(filter = '') {
 document.getElementById('medicine-search').addEventListener('input', e => renderMedicineTable(e.target.value));
 
 function populateSupplierDropdown() {
-  const sel = document.getElementById('med-supplier');
-  sel.innerHTML = '<option value="">-- None --</option>' +
-    suppliers.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
+  ['med-supplier', 'pur-supplier'].forEach(id => {
+    const sel = document.getElementById(id);
+    if (!sel) return;
+    sel.innerHTML = '<option value="">-- None --</option>' +
+      suppliers.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
+  });
+}
+
+function getDistinctProducts() {
+  // Returns one representative medicine per distinct product name (latest entry wins for defaults)
+  const map = new Map();
+  medicines.forEach(m => map.set(m.name, m));
+  return Array.from(map.values());
+}
+
+function populateProductDropdown() {
+  const sel = document.getElementById('pur-product');
+  const products = getDistinctProducts();
+  sel.innerHTML = '<option value="">-- Select existing product --</option>' +
+    products.map(m => `<option value="${esc(m.name)}">${esc(m.name)}</option>`).join('');
 }
 
 function openAddMedicine() {
@@ -197,7 +214,6 @@ window.deleteMedicine = function(id) {
 };
 
 document.getElementById('btn-add-medicine').addEventListener('click', openAddMedicine);
-document.getElementById('btn-add-medicine-2').addEventListener('click', openAddMedicine);
 document.getElementById('btn-cancel-medicine').addEventListener('click', () => {
   document.getElementById('modal-medicine').classList.remove('open');
 });
@@ -242,6 +258,77 @@ document.getElementById('btn-save-medicine').addEventListener('click', () => {
   document.getElementById('modal-medicine').classList.remove('open');
   renderMedicineTable();
   renderPurchaseTable();
+});
+
+/* ============ NEW PURCHASE (restock existing product) ============ */
+document.getElementById('btn-new-purchase').addEventListener('click', () => {
+  const products = getDistinctProducts();
+  if (!products.length) {
+    showToast('Pahile Medicines page bata product thapnu hos');
+    return;
+  }
+  populateProductDropdown();
+  populateSupplierDropdown();
+  ['pur-batch','pur-expiry','pur-qty','pur-purchase-price','pur-sell-price'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('pur-product').value = '';
+  document.getElementById('pur-supplier').value = '';
+  document.getElementById('modal-purchase').classList.add('open');
+});
+
+document.getElementById('btn-cancel-purchase').addEventListener('click', () => {
+  document.getElementById('modal-purchase').classList.remove('open');
+});
+
+// Auto-fill selling price + supplier default when an existing product is chosen
+document.getElementById('pur-product').addEventListener('change', () => {
+  const name = document.getElementById('pur-product').value;
+  const ref = medicines.find(m => m.name === name);
+  if (ref) {
+    document.getElementById('pur-sell-price').value = ref.sellPrice;
+    document.getElementById('pur-supplier').value = ref.supplierId || '';
+  }
+});
+
+document.getElementById('btn-save-purchase').addEventListener('click', () => {
+  const productName = document.getElementById('pur-product').value;
+  const batch = document.getElementById('pur-batch').value.trim();
+  const expiry = document.getElementById('pur-expiry').value;
+  const qty = parseFloat(document.getElementById('pur-qty').value);
+  const purchasePrice = parseFloat(document.getElementById('pur-purchase-price').value);
+  const sellPrice = parseFloat(document.getElementById('pur-sell-price').value);
+  const supplierId = document.getElementById('pur-supplier').value || null;
+
+  if (!productName || !batch || !expiry || isNaN(qty) || isNaN(purchasePrice) || isNaN(sellPrice)) {
+    showToast('Kripaya sabai required (*) field bharnu hos');
+    return;
+  }
+
+  const ref = medicines.find(m => m.name === productName);
+  if (!ref) { showToast('Product fela parena'); return; }
+
+  // New batch entry for the existing product, carrying over its catalog info (sku, generic, category)
+  medicines.push({
+    id: uid(),
+    name: ref.name,
+    sku: ref.sku || '',
+    barcode: ref.barcode || '',
+    generic: ref.generic || '',
+    category: ref.category || 'Tablet',
+    batch, expiry, qty, purchasePrice, sellPrice,
+    supplierId
+  });
+
+  purchases.push({
+    id: uid(), date: new Date().toISOString(),
+    medicineName: productName, batch, qty, purchasePrice,
+    supplierId
+  });
+
+  save();
+  document.getElementById('modal-purchase').classList.remove('open');
+  renderMedicineTable();
+  renderPurchaseTable();
+  showToast('Purchase entry thapiyo, stock update bhayo');
 });
 
 /* ============ SUPPLIERS ============ */
