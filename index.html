@@ -68,13 +68,15 @@
         <button class="btn primary" id="btn-add-medicine">+ Add Medicine</button>
       </div>
 
-      <input type="text" id="medicine-search" class="search-box" placeholder="Search medicine by name...">
+      <input type="text" id="medicine-search" class="search-box" placeholder="Search by name, SKU, or barcode...">
 
       <div class="table-wrap">
         <table id="medicine-table">
           <thead>
             <tr>
               <th>Name</th>
+              <th>SKU</th>
+              <th>Barcode</th>
               <th>Generic</th>
               <th>Batch No</th>
               <th>Expiry</th>
@@ -251,6 +253,10 @@
     <input type="hidden" id="med-id">
     <label>Medicine Name *</label>
     <input type="text" id="med-name">
+    <label>SKU (Internal Code)</label>
+    <input type="text" id="med-sku" placeholder="jastai PCM-TAB-500">
+    <label>Manufacturing Barcode</label>
+    <input type="text" id="med-barcode" placeholder="product packet ko barcode number">
     <label>Generic Name</label>
     <input type="text" id="med-generic">
     <label>Category</label>

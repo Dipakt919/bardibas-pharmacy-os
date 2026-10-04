@@ -115,9 +115,14 @@ function esc(s) {
 /* ============ MEDICINES ============ */
 function renderMedicineTable(filter = '') {
   const tbody = document.getElementById('medicine-tbody');
-  const list = medicines.filter(m => m.name.toLowerCase().includes(filter.toLowerCase()));
+  const f = filter.toLowerCase();
+  const list = medicines.filter(m =>
+    m.name.toLowerCase().includes(f) ||
+    (m.sku || '').toLowerCase().includes(f) ||
+    (m.barcode || '').toLowerCase().includes(f)
+  );
   if (!list.length) {
-    tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;color:var(--text-muted);padding:24px;">Kunai medicine thapieko xaina</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="11" style="text-align:center;color:var(--text-muted);padding:24px;">Kunai medicine thapieko xaina</td></tr>`;
     return;
   }
   tbody.innerHTML = list.map(m => {
@@ -128,6 +133,8 @@ function renderMedicineTable(filter = '') {
     const supplierName = suppliers.find(s => s.id === m.supplierId)?.name || '-';
     return `<tr class="${rowClass}">
       <td>${esc(m.name)}</td>
+      <td>${esc(m.sku || '-')}</td>
+      <td>${esc(m.barcode || '-')}</td>
       <td>${esc(m.generic || '-')}</td>
       <td>${esc(m.batch)}</td>
       <td>${esc(m.expiry)}</td>
@@ -154,7 +161,7 @@ function populateSupplierDropdown() {
 function openAddMedicine() {
   editingMedicineId = null;
   document.getElementById('medicine-modal-title').textContent = 'Add Medicine';
-  ['med-name','med-generic','med-batch','med-expiry','med-qty','med-purchase-price','med-sell-price'].forEach(id => document.getElementById(id).value = '');
+  ['med-name','med-sku','med-barcode','med-generic','med-batch','med-expiry','med-qty','med-purchase-price','med-sell-price'].forEach(id => document.getElementById(id).value = '');
   document.getElementById('med-category').value = 'Tablet';
   populateSupplierDropdown();
   document.getElementById('med-supplier').value = '';
@@ -167,6 +174,8 @@ window.openEditMedicine = function(id) {
   editingMedicineId = id;
   document.getElementById('medicine-modal-title').textContent = 'Edit Medicine';
   document.getElementById('med-name').value = m.name;
+  document.getElementById('med-sku').value = m.sku || '';
+  document.getElementById('med-barcode').value = m.barcode || '';
   document.getElementById('med-generic').value = m.generic || '';
   document.getElementById('med-category').value = m.category || 'Tablet';
   document.getElementById('med-batch').value = m.batch;
@@ -207,7 +216,10 @@ document.getElementById('btn-save-medicine').addEventListener('click', () => {
   }
 
   const data = {
-    name, generic: document.getElementById('med-generic').value.trim(),
+    name,
+    sku: document.getElementById('med-sku').value.trim(),
+    barcode: document.getElementById('med-barcode').value.trim(),
+    generic: document.getElementById('med-generic').value.trim(),
     category: document.getElementById('med-category').value,
     batch, expiry, qty, purchasePrice, sellPrice,
     supplierId: document.getElementById('med-supplier').value || null
@@ -300,7 +312,10 @@ billingSearch.addEventListener('input', () => {
   const q = billingSearch.value.trim().toLowerCase();
   const resultsEl = document.getElementById('billing-search-results');
   if (!q) { resultsEl.innerHTML = ''; return; }
-  const matches = medicines.filter(m => m.name.toLowerCase().includes(q) && m.qty > 0).slice(0, 10);
+  const matches = medicines.filter(m =>
+    (m.name.toLowerCase().includes(q) || (m.sku||'').toLowerCase().includes(q) || (m.barcode||'').toLowerCase().includes(q))
+    && m.qty > 0
+  ).slice(0, 10);
   resultsEl.innerHTML = matches.length ? matches.map(m =>
     `<div class="search-result-item" onclick="addToCart('${m.id}')">
       ${esc(m.name)} <span class="sr-meta">(Batch ${esc(m.batch)}, Stock: ${m.qty}, Rs.${m.sellPrice})</span>
