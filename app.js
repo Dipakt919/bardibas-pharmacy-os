@@ -29,6 +29,9 @@ let editingMedicineId = null;
 let salesDrafts = DB.get('salesDrafts', []);
 let purchaseDrafts = DB.get('purchaseDrafts', []);
 let activityLog = DB.get('activityLog', []);
+let categories = DB.get('categories', ['Tablet', 'Syrup', 'Capsule', 'Injection', 'Ointment', 'Drops', 'Other']);
+let brands = DB.get('brands', []);
+let units = DB.get('units', ['Strip', 'Tablet', 'Capsule', 'Bottle', 'Vial', 'Tube', 'Sachet', 'Box', 'Piece']);
 
 function save() {
   DB.set('medicines', medicines);
@@ -39,6 +42,9 @@ function save() {
   DB.set('salesDrafts', salesDrafts);
   DB.set('purchaseDrafts', purchaseDrafts);
   DB.set('activityLog', activityLog);
+  DB.set('categories', categories);
+  DB.set('brands', brands);
+  DB.set('units', units);
 }
 
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
@@ -145,37 +151,222 @@ function genSku(name, cat) {
 function catalogOf(m) {
   return { name: m.name, sku: m.sku || '', barcode: m.barcode || '', generic: m.generic || '',
     manufacturer: m.manufacturer || '', category: m.category || 'Tablet', unit: m.unit || 'Strip',
-    drugClass: m.drugClass || 'C', vat: m.vat || 'exempt', reorderLevel: m.reorderLevel ?? '', rack: m.rack || '' };
+    brand: m.brand || '', active: m.active !== false, drugClass: m.drugClass || 'C', vat: m.vat || 'exempt', reorderLevel: m.reorderLevel ?? '', rack: m.rack || '' };
 }
 
-function renderMedicineTable(filter = '') {
-  const tbody = $('medicine-tbody');
-  const f = filter.toLowerCase();
-  const list = medicines.filter(m =>
-    m.name.toLowerCase().includes(f) || (m.sku || '').toLowerCase().includes(f) ||
-    (m.barcode || '').toLowerCase().includes(f) || (m.generic || '').toLowerCase().includes(f) ||
-    (m.manufacturer || '').toLowerCase().includes(f)
-  ).sort((a, b) => a.name.localeCompare(b.name) || a.expiry.localeCompare(b.expiry));
-  if (!list.length) {
-    tbody.innerHTML = `<tr><td colspan="12" style="text-align:center;color:var(--text-muted);padding:24px;">Kunai medicine thapieko xaina</td></tr>`;
-    return;
-  }
-  tbody.innerHTML = list.map(m => {
-    const d = daysUntil(m.expiry);
-    const rowClass = d < 0 ? 'row-danger' : d <= settings.expiryDays ? 'row-warn' : '';
-    const supplierName = suppliers.find(s => s.id === m.supplierId)?.name || '-';
-    return `<tr class="${rowClass}">
-      <td>${esc(m.name)}${m.unit ? ` <small>(${esc(m.unit)})</small>` : ''}</td>
-      <td>${esc(m.sku || '-')}</td><td>${esc(m.barcode || '-')}</td><td>${esc(m.generic || '-')}</td>
-      <td>${esc(m.batch)}</td><td>${esc(m.expiry)}</td><td>${m.qty}</td>
-      <td>${m.purchasePrice}</td><td>${mrpOf(m)}</td><td>${m.sellPrice}</td><td>${esc(supplierName)}</td>
-      <td>
-        <button class="link-btn" onclick="openEditMedicine('${m.id}')">Edit</button>
-        <button class="link-btn danger" onclick="deleteMedicine('${m.id}')">Delete</button>
-      </td></tr>`;
-  }).join('');
+/* ---- Products: grouping, filters, tabs ---- */
+const PAGE = 50;
+let listPage = 0, selectMode = false, ptab = 'overview';
+const selected = new Set();
+
+function setSel(id, list, v, blank) {
+  const l = [...list]; if (v && !l.includes(v)) l.push(v);
+  $(id).innerHTML = (blank ? '<option value="">-- None --</option>' : '') + l.map(x => `<option>${esc(x)}</option>`).join('');
+  $(id).value = v || (blank ? '' : (l[0] || ''));
 }
-$('medicine-search').addEventListener('input', e => renderMedicineTable(e.target.value));
+
+function groupProducts() {
+  const map = new Map();
+  medicines.forEach(m => {
+    const k = m.name.trim().toLowerCase();
+    let g = map.get(k); if (!g) { g = { key: k, name: m.name, batches: [], qty: 0 }; map.set(k, g); }
+    g.batches.push(m); g.qty += m.qty;
+  });
+  return [...map.values()].map(g => {
+    g.batches.sort((a, b) => a.expiry.localeCompare(b.expiry));
+    const live = g.batches.filter(b => b.qty > 0);
+    g.ref = live[0] || g.batches[0]; g.p = g.batches[0];
+    g.active = g.p.active !== false;
+    g.reorder = (g.p.reorderLevel === '' || g.p.reorderLevel == null) ? settings.lowStockThreshold : +g.p.reorderLevel;
+    g.status = g.qty <= 0 ? 'out' : g.qty <= g.reorder ? 'low' : 'in';
+    g.nearExp = live.length ? live[0].expiry : null;
+    return g;
+  }).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function productFilters() {
+  const q = $('medicine-search').value.trim().toLowerCase(), cat = $('pf-cat').value, st = $('pf-stock').value, inactive = $('pf-inactive').checked;
+  return groupProducts().filter(g => {
+    if (!inactive && !g.active) return false;
+    if (cat && g.p.category !== cat) return false;
+    if (st && (st === 'attn' ? g.status === 'in' : g.status !== st)) return false;
+    return !q || g.batches.some(m => [m.name, m.sku, m.barcode, m.generic, m.manufacturer, m.brand].some(x => String(x || '').toLowerCase().includes(q)));
+  });
+}
+
+function setPTab(t) {
+  ptab = t;
+  document.querySelectorAll('.ptab-btn').forEach(b => b.classList.toggle('active', b.dataset.ptab === t));
+  $('ptab-overview').classList.toggle('active', t === 'overview');
+  $('ptab-list').classList.toggle('active', t === 'list');
+  $('ptab-catalog').classList.toggle('active', t in CAT);
+  renderMedicineTable();
+}
+document.querySelectorAll('.ptab-btn').forEach(b => b.addEventListener('click', () => setPTab(b.dataset.ptab)));
+$('ov-open-list').addEventListener('click', () => setPTab('list'));
+$('ov-low-card').addEventListener('click', () => { $('pf-stock').value = 'attn'; listPage = 0; setPTab('list'); });
+
+const lakh = v => v >= 1e5 ? 'Rs. ' + (v / 1e5).toFixed(2) + ' Lakh' : rs(v);
+
+function renderProductOverview(all) {
+  const act = all.filter(g => g.active);
+  $('ov-total').textContent = all.length;
+  $('ov-low').textContent = act.filter(g => g.status !== 'in').length;
+  $('ov-sets').textContent = `${categories.length}/${brands.length}/${units.length}`;
+  $('ov-value').textContent = lakh(medicines.reduce((a, m) => a + m.qty * m.purchasePrice, 0));
+  $('ov-visible').textContent = Math.min(PAGE, productFilters().length);
+}
+
+function renderMedicineTable() {
+  const cur = $('pf-cat').value;
+  $('pf-cat').innerHTML = '<option value="">Category</option>' + [...new Set([...categories, ...medicines.map(m => m.category).filter(Boolean)])].map(c => `<option>${esc(c)}</option>`).join('');
+  $('pf-cat').value = cur;
+  const all = groupProducts(), list = productFilters();
+  const pages = Math.max(1, Math.ceil(list.length / PAGE));
+  listPage = Math.min(listPage, pages - 1);
+  const slice = list.slice(listPage * PAGE, (listPage + 1) * PAGE);
+  $('pf-count').textContent = list.length ? `${listPage * PAGE + 1}-${listPage * PAGE + slice.length} of ${list.length} products` : '0 products';
+  $('pager-info').textContent = `Page ${listPage + 1} / ${pages}`;
+  $('pg-prev').disabled = listPage === 0; $('pg-next').disabled = listPage >= pages - 1;
+  $('medicine-table').classList.toggle('select-mode', selectMode);
+  $('bulk-bar').style.display = selectMode ? 'flex' : 'none';
+  $('bulk-count').textContent = selected.size + ' selected';
+  $('btn-select').textContent = selectMode ? '✕ Done' : '☑ Select';
+  $('medicine-tbody').innerHTML = slice.length ? slice.map(g => {
+    const d = g.nearExp ? daysUntil(g.nearExp) : null;
+    const cls = !g.active ? 'row-inactive' : d !== null && d < 0 ? 'row-danger' : d !== null && d <= settings.expiryDays ? 'row-warn' : '';
+    const r = g.ref, k = esc(g.key);
+    return `<tr class="${cls}">
+      <td class="sel-col"><input type="checkbox" data-sel="${k}" ${selected.has(g.key) ? 'checked' : ''}></td>
+      <td>${esc(g.p.sku || '-')}</td>
+      <td>${esc(g.name)}<div class="sub">${esc(g.p.generic || '')}${g.batches.length > 1 ? ' · ' + g.batches.length + ' batches' : ''}</div></td>
+      <td>${esc(g.p.category || '-')}</td><td>${esc(g.p.brand || '-')}</td><td>${esc(g.p.rack || 'Unassigned')}</td>
+      <td>${rs(r.purchasePrice)}</td><td>${rs(r.sellPrice)}</td>
+      <td class="${g.status === 'in' ? '' : 'stock-bad'}">${g.status === 'in' ? '' : '⚠ '}${g.qty}</td>
+      <td>${g.nearExp ? esc(g.nearExp) + (d < 0 ? ' (expired)' : '') : '-'}</td>
+      <td><span class="badge ${g.active ? 'on' : 'off'}">${g.active ? 'Active' : 'Inactive'}</span></td>
+      <td><button class="row-menu-btn" data-k="${k}" aria-label="Actions">⋮</button></td></tr>`;
+  }).join('') : `<tr><td colspan="12" style="text-align:center;color:var(--text-muted);padding:24px;">Kunai product fela parena</td></tr>`;
+  renderProductOverview(all);
+  renderCatalogTab(all);
+}
+
+['medicine-search', 'pf-cat', 'pf-stock', 'pf-inactive'].forEach(id => $(id).addEventListener('input', () => { listPage = 0; renderMedicineTable(); }));
+$('pg-prev').addEventListener('click', () => { listPage--; renderMedicineTable(); });
+$('pg-next').addEventListener('click', () => { listPage++; renderMedicineTable(); });
+
+/* ---- Select / bulk actions ---- */
+$('btn-select').addEventListener('click', () => { selectMode = !selectMode; selected.clear(); if (selectMode) setPTab('list'); else renderMedicineTable(); });
+$('medicine-tbody').addEventListener('change', e => {
+  const k = e.target.dataset.sel; if (k === undefined) return;
+  e.target.checked ? selected.add(k) : selected.delete(k);
+  $('bulk-count').textContent = selected.size + ' selected';
+});
+$('sel-all').addEventListener('change', e => {
+  const list = productFilters().slice(listPage * PAGE, (listPage + 1) * PAGE);
+  list.forEach(g => e.target.checked ? selected.add(g.key) : selected.delete(g.key));
+  renderMedicineTable();
+});
+function setActive(keys, on) {
+  medicines.forEach(m => { if (keys.has(m.name.trim().toLowerCase())) m.active = on; });
+  logAct((on ? 'Activate: ' : 'Deactivate: ') + keys.size + ' product'); save(); renderMedicineTable();
+}
+$('bulk-activate').addEventListener('click', () => { if (!selected.size) return showToast('Pahile product select garnu hos'); setActive(new Set(selected), true); showToast('Active bhayo'); });
+$('bulk-deactivate').addEventListener('click', () => { if (!selected.size) return showToast('Pahile product select garnu hos'); setActive(new Set(selected), false); showToast('Inactive bhayo'); });
+$('bulk-delete').addEventListener('click', () => {
+  if (!selected.size) return showToast('Pahile product select garnu hos');
+  if (!confirm(selected.size + ' product (sabai batch) hmesha ko lagi delete garne?')) return;
+  medicines = medicines.filter(m => !selected.has(m.name.trim().toLowerCase()));
+  logAct('Bulk delete: ' + selected.size + ' product'); selected.clear(); save(); renderMedicineTable(); showToast('Delete bhayo');
+});
+
+/* ---- Row action menu ---- */
+const rowMenu = document.createElement('div');
+rowMenu.id = 'row-menu'; rowMenu.className = 'row-menu'; document.body.appendChild(rowMenu);
+
+document.addEventListener('click', e => {
+  const b = e.target.closest('.row-menu-btn');
+  if (b) {
+    const g = groupProducts().find(x => x.key === b.dataset.k); if (!g) return;
+    rowMenu.innerHTML = [['view', 'View Details'], ['edit', 'Edit'], ['variant', 'Add Variant / Batch'], ['label', 'Print Label'], ['history', 'Movement History'], ['toggle', g.active ? 'Deactivate' : 'Activate']]
+      .map(([a, l]) => `<button data-a="${a}" data-k="${esc(g.key)}" class="${a === 'toggle' ? 'sep' : ''}">${l}</button>`).join('');
+    const r = b.getBoundingClientRect();
+    rowMenu.style.top = (r.bottom + 250 > innerHeight ? Math.max(8, r.top - 250) : r.bottom) + 'px';
+    rowMenu.style.left = Math.max(8, r.right - 190) + 'px';
+    rowMenu.classList.add('open'); return;
+  }
+  const a = e.target.closest('#row-menu button');
+  rowMenu.classList.remove('open');
+  if (a) productAction(a.dataset.a, a.dataset.k);
+});
+
+function productAction(act, key) {
+  const g = groupProducts().find(x => x.key === key); if (!g) return;
+  const p = g.p, r = g.ref;
+  if (act === 'edit') return openEditMedicine(r.id);
+  if (act === 'toggle') { setActive(new Set([key]), !g.active); return showToast(g.active ? 'Product inactive bhayo' : 'Product active bhayo'); }
+  if (act === 'variant') {
+    editingBillId = null; resumingPurDraftId = null;
+    return openPurchaseModal({ lines: [{ product: g.name, rate: r.purchasePrice, mrp: mrpOf(r), sell: r.sellPrice }], supplierId: r.supplierId || '' });
+  }
+  if (act === 'view') {
+    const rows = g.batches.map(b => `<tr><td>${esc(b.batch)}</td><td>${esc(b.expiry)}</td><td>${b.qty}</td><td>${b.purchasePrice}</td><td>${mrpOf(b)}</td><td>${b.sellPrice}</td><td>${esc(supName(b.supplierId))}</td></tr>`).join('');
+    return showGeneric(g.name, `<div class="detail-grid">
+      <div><span>SKU</span>${esc(p.sku || '-')}</div><div><span>Barcode</span>${esc(p.barcode || '-')}</div>
+      <div><span>Generic</span>${esc(p.generic || '-')}</div><div><span>Manufacturer</span>${esc(p.manufacturer || '-')}</div>
+      <div><span>Category</span>${esc(p.category || '-')}</div><div><span>Brand</span>${esc(p.brand || '-')}</div>
+      <div><span>Unit</span>${esc(p.unit || '-')}</div><div><span>Rack</span>${esc(p.rack || 'Unassigned')}</div>
+      <div><span>Class</span>${esc(p.drugClass || 'C')}</div><div><span>VAT</span>${p.vat === '13' ? '13%' : 'Exempt'}</div>
+      <div><span>Total stock</span>${g.qty}</div><div><span>Reorder level</span>${g.reorder}</div></div>
+      <h2 style="margin-top:14px">Batches</h2>
+      <div class="table-wrap"><table style="min-width:480px"><thead><tr><th>Batch</th><th>Expiry</th><th>Qty</th><th>Cost</th><th>MRP</th><th>Sell</th><th>Supplier</th></tr></thead><tbody>${rows}</tbody></table></div>`);
+  }
+  if (act === 'label') {
+    $('print-area').innerHTML = `<div class="plabel"><b>${esc(g.name)}</b><br>SKU: ${esc(p.sku || '-')}${p.barcode ? '<br>Barcode: ' + esc(p.barcode) : ''}<br>Batch ${esc(r.batch)} | Exp ${esc(r.expiry)}<br><b>MRP ${rs(mrpOf(r))}</b><br><small>${esc(settings.name)}</small></div>`;
+    document.body.classList.add('printing');
+    const done = () => { document.body.classList.remove('printing'); window.removeEventListener('afterprint', done); };
+    window.addEventListener('afterprint', done); return window.print();
+  }
+  if (act === 'history') {
+    const mv = [];
+    purchases.filter(x => sameName(x.medicineName, g.name)).forEach(x => mv.push({ d: x.date, t: x.payment === 'Opening' ? 'Opening stock' : 'Purchase', ref: x.invoiceNo || '-', batch: x.batch, q: +x.qty }));
+    sales.forEach(s => s.items.filter(i => sameName(i.name, g.name)).forEach(i => {
+      mv.push({ d: s.date, t: 'Sale', ref: s.invoiceNo, batch: i.batch, q: -i.qty });
+      if (i.returnedQty) mv.push({ d: s.date, t: 'Return', ref: s.invoiceNo, batch: i.batch, q: i.returnedQty });
+      if (s.status === 'Cancelled') mv.push({ d: s.cancelledDate || s.date, t: 'Sale cancelled', ref: s.invoiceNo, batch: i.batch, q: i.qty - (i.returnedQty || 0) });
+    }));
+    mv.sort((a, b) => new Date(b.d) - new Date(a.d));
+    return showGeneric('Movement History - ' + g.name, `<div class="table-wrap" style="max-height:360px;overflow:auto"><table style="min-width:420px"><thead><tr><th>Date</th><th>Type</th><th>Ref</th><th>Batch</th><th>Qty</th></tr></thead><tbody>${
+      mv.map(x => `<tr><td>${fmtDate(x.d)}</td><td>${x.t}</td><td>${esc(x.ref)}</td><td>${esc(x.batch)}</td><td style="color:${x.q < 0 ? 'var(--red)' : 'var(--accent)'}">${x.q > 0 ? '+' : ''}${x.q}</td></tr>`).join('') || '<tr><td colspan="5" style="text-align:center;color:var(--text-muted)">Kunai movement chaina</td></tr>'}</tbody></table></div>`);
+  }
+}
+
+/* ---- Categories / Brands / Units ---- */
+const CAT = {
+  categories: { plural: 'Categories', field: 'category', get: () => categories, set: v => categories = v },
+  brands: { plural: 'Brands', field: 'brand', get: () => brands, set: v => brands = v },
+  units: { plural: 'Units', field: 'unit', get: () => units, set: v => units = v }
+};
+function renderCatalogTab(all) {
+  const c = CAT[ptab]; if (!c) return;
+  all = all || groupProducts();
+  $('cat-title').textContent = c.plural;
+  $('cat-tbody').innerHTML = c.get().map((n, i) => `<tr><td>${esc(n)}</td><td>${all.filter(g => (g.p[c.field] || '') === n).length}</td><td><button class="link-btn danger" data-del="${i}">Delete</button></td></tr>`).join('')
+    || `<tr><td colspan="3" style="text-align:center;color:var(--text-muted)">Kunai ${c.plural.toLowerCase()} chaina</td></tr>`;
+}
+$('cat-add').addEventListener('click', () => {
+  const c = CAT[ptab], n = val('cat-new'); if (!c || !n) return;
+  if (c.get().some(x => sameName(x, n))) return showToast('Yo pahile nai xa');
+  c.set([...c.get(), n]); $('cat-new').value = ''; save(); renderMedicineTable(); showToast(n + ' thapiyo');
+});
+$('cat-new').addEventListener('keydown', e => { if (e.key === 'Enter') $('cat-add').click(); });
+$('cat-tbody').addEventListener('click', e => {
+  const i = e.target.dataset.del; if (i === undefined) return;
+  const c = CAT[ptab], n = c.get()[i];
+  if (groupProducts().some(g => (g.p[c.field] || '') === n)) return showToast('Yo product ma use bhairaheko xa, delete garna milena');
+  c.set(c.get().filter((_, j) => j != i)); save(); renderMedicineTable();
+});
+
 
 function populateSupplierDropdown() {
   ['med-supplier', 'pur-supplier'].forEach(id => {
@@ -209,8 +400,9 @@ function fillMedicineForm(m) {
   $('med-name').value = m.name || '';
   $('med-generic').value = m.generic || '';
   $('med-manufacturer').value = m.manufacturer || '';
-  $('med-category').value = m.category || 'Tablet';
-  $('med-unit').value = m.unit || 'Strip';
+  setSel('med-category', categories, m.category || categories[0]);
+  setSel('med-brand', brands, m.brand, true);
+  setSel('med-unit', units, m.unit || units[0]);
   $('med-sku').value = m.sku || '';
   $('med-barcode').value = m.barcode || '';
   $('med-class').value = m.drugClass || 'C';
@@ -287,7 +479,7 @@ $('btn-save-medicine').addEventListener('click', () => {
   const re = $('med-reorder').value;
   const catalog = {
     name, sku, barcode, generic: val('med-generic'), manufacturer: val('med-manufacturer'), category,
-    unit: $('med-unit').value, drugClass: $('med-class').value, vat: $('med-vat').value,
+    unit: $('med-unit').value, brand: $('med-brand').value, drugClass: $('med-class').value, vat: $('med-vat').value,
     reorderLevel: re === '' ? '' : parseFloat(re), rack: val('med-rack')
   };
   const batchData = { batch, expiry, qty, purchasePrice, mrp, sellPrice, supplierId: $('med-supplier').value || null };
@@ -661,7 +853,7 @@ const billingSearch = document.getElementById('billing-search');
 
 function sellableBatches(q) {
   q = q.toLowerCase();
-  return medicines.filter(m => m.qty > 0 && daysUntil(m.expiry) >= 0 &&
+  return medicines.filter(m => m.active !== false && m.qty > 0 && daysUntil(m.expiry) >= 0 &&
     (m.name.toLowerCase().includes(q) || (m.sku || '').toLowerCase().includes(q) ||
      (m.barcode || '').toLowerCase().includes(q) || (m.generic || '').toLowerCase().includes(q)))
     .sort((a, b) => a.name.localeCompare(b.name) || a.expiry.localeCompare(b.expiry)); // FEFO: earliest expiry first
@@ -1155,7 +1347,7 @@ $('import-file').addEventListener('change', async e => {
 });
 
 $('btn-backup').addEventListener('click', () => {
-  downloadBlob(new Blob([JSON.stringify({ app: 'pharmacy-os', version: 2, exported: new Date().toISOString(), medicines, suppliers, sales, purchases, settings, salesDrafts, purchaseDrafts, activityLog })], { type: 'application/json' }), 'pharmacy_backup_' + todayISO() + '.json');
+  downloadBlob(new Blob([JSON.stringify({ app: 'pharmacy-os', version: 2, exported: new Date().toISOString(), medicines, suppliers, sales, purchases, settings, salesDrafts, purchaseDrafts, activityLog, categories, brands, units })], { type: 'application/json' }), 'pharmacy_backup_' + todayISO() + '.json');
   showToast('Backup download bhayo');
 });
 $('btn-restore').addEventListener('click', () => $('restore-file').click());
@@ -1166,7 +1358,7 @@ $('restore-file').addEventListener('change', async e => {
     if (d.app !== 'pharmacy-os' || !Array.isArray(d.medicines) || !Array.isArray(d.sales)) throw new Error('bad');
     if (!confirm(`Restore garda abhiko sabai data replace huncha.\nBackup: ${d.medicines.length} batch, ${d.sales.length} sale. Continue?`)) return;
     medicines = d.medicines; suppliers = d.suppliers || []; sales = d.sales; purchases = d.purchases || []; settings = d.settings || settings;
-    salesDrafts = d.salesDrafts || []; purchaseDrafts = d.purchaseDrafts || []; activityLog = d.activityLog || [];
+    categories = d.categories || categories; brands = d.brands || []; units = d.units || units; salesDrafts = d.salesDrafts || []; purchaseDrafts = d.purchaseDrafts || []; activityLog = d.activityLog || [];
     save(); location.reload();
   } catch (err) { showToast('Backup file valid xaina'); }
 });

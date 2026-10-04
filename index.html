@@ -17,7 +17,7 @@
       <span class="brand-text">Pharmacy OS</span>
     </div>
     <button class="nav-btn active" data-page="dashboard">Dashboard</button>
-    <button class="nav-btn" data-page="medicines">Medicines</button>
+    <button class="nav-btn" data-page="medicines">Products</button>
     <button class="nav-btn" data-page="billing">Billing</button>
     <button class="nav-btn" data-page="purchase">Purchase</button>
     <button class="nav-btn" data-page="suppliers">Suppliers</button>
@@ -61,41 +61,88 @@
       </div>
     </section>
 
-    <!-- MEDICINES -->
+    <!-- MEDICINES / PRODUCTS -->
     <section id="page-medicines" class="page">
       <div class="page-head">
-        <h1>Medicines / Stock</h1>
+        <div><h1 style="margin:0">Products</h1><p class="hint" style="margin:4px 0 0">Manage your product inventory and pricing</p></div>
         <div class="head-actions">
           <button class="btn" id="btn-template">Template</button>
-          <button class="btn" id="btn-import-meds">Import Excel</button>
-          <button class="btn" id="btn-export-meds">Export Excel</button>
-          <button class="btn primary" id="btn-add-medicine">+ Add New Product</button>
+          <button class="btn" id="btn-import-meds">⬆ Import</button>
+          <button class="btn" id="btn-export-meds">⬇ Export</button>
+          <button class="btn" id="btn-select">☑ Select</button>
+          <button class="btn primary" id="btn-add-medicine">+ Add Product</button>
         </div>
         <input type="file" id="import-file" accept=".xlsx,.xls,.csv" hidden>
       </div>
 
-      <input type="text" id="medicine-search" class="search-box" placeholder="Search by name, SKU, or barcode...">
+      <div class="subtabs">
+        <button class="ptab-btn active" data-ptab="overview">Overview</button>
+        <button class="ptab-btn" data-ptab="list">All Products</button>
+        <button class="ptab-btn" data-ptab="categories">Categories</button>
+        <button class="ptab-btn" data-ptab="brands">Brands</button>
+        <button class="ptab-btn" data-ptab="units">Units</button>
+      </div>
 
-      <div class="table-wrap">
-        <table id="medicine-table">
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>SKU</th>
-              <th>Barcode</th>
-              <th>Generic</th>
-              <th>Batch No</th>
-              <th>Expiry</th>
-              <th>Qty</th>
-              <th>Purchase Rs.</th>
-              <th>MRP</th>
-              <th>Sell Rs.</th>
-              <th>Supplier</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody id="medicine-tbody"></tbody>
-        </table>
+      <!-- Overview -->
+      <div id="ptab-overview" class="ptab active">
+        <div class="stat-grid">
+          <div class="stat-card"><div class="stat-label">Total Products</div><div class="stat-value" id="ov-total">0</div><div class="stat-sub">Active and inactive product records</div></div>
+          <div class="stat-card danger clickable" id="ov-low-card"><div class="stat-label">Low Stock</div><div class="stat-value" id="ov-low">0</div><div class="stat-sub">Products at or below minimum stock</div></div>
+          <div class="stat-card"><div class="stat-label">Catalog Sets</div><div class="stat-value" id="ov-sets">0/0/0</div><div class="stat-sub">Categories, brands, and units</div></div>
+          <div class="stat-card good"><div class="stat-label">Stock Value</div><div class="stat-value" id="ov-value">Rs. 0</div><div class="stat-sub">Current cost basis</div></div>
+        </div>
+        <div class="panel narrow">
+          <h2>All Products</h2>
+          <p class="hint">Open the full product table with filters, bulk actions, labels and add/edit workflow.</p>
+          <div class="stat-card" style="margin-bottom:10px"><div class="stat-label">Visible now</div><div class="stat-value" id="ov-visible">0</div></div>
+          <button class="btn primary full" id="ov-open-list">Open Product List</button>
+        </div>
+      </div>
+
+      <!-- All Products -->
+      <div id="ptab-list" class="ptab">
+        <div class="filter-bar">
+          <input type="text" id="medicine-search" class="search-box" placeholder="Search by name, SKU, generic or barcode...">
+          <select id="pf-cat"></select>
+          <select id="pf-stock">
+            <option value="">Stock Status</option><option value="in">In stock</option><option value="attn">Low / out of stock</option>
+            <option value="low">Low stock</option><option value="out">Out of stock</option>
+          </select>
+          <label class="switch-row"><input type="checkbox" id="pf-inactive"> Show inactive</label>
+        </div>
+        <div class="hint" id="pf-count"></div>
+        <div id="bulk-bar" class="bulk-bar" style="display:none">
+          <span id="bulk-count">0 selected</span>
+          <button class="btn sm" id="bulk-activate">Activate</button>
+          <button class="btn sm" id="bulk-deactivate">Deactivate</button>
+          <button class="btn sm" id="bulk-delete" style="color:var(--red)">Delete</button>
+        </div>
+        <div class="table-wrap">
+          <table id="medicine-table">
+            <thead>
+              <tr>
+                <th class="sel-col"><input type="checkbox" id="sel-all"></th>
+                <th>SKU</th><th>Product</th><th>Category</th><th>Brand</th><th>Bin/Rack</th>
+                <th>Cost</th><th>Price</th><th>Stock</th><th>Expiry</th><th>Status</th><th></th>
+              </tr>
+            </thead>
+            <tbody id="medicine-tbody"></tbody>
+          </table>
+        </div>
+        <div class="pager">
+          <button class="btn sm" id="pg-prev">‹ Prev</button>
+          <span id="pager-info"></span>
+          <button class="btn sm" id="pg-next">Next ›</button>
+        </div>
+      </div>
+
+      <!-- Categories / Brands / Units -->
+      <div id="ptab-catalog" class="ptab">
+        <div class="panel narrow">
+          <h2 id="cat-title"></h2>
+          <div class="cat-add"><input type="text" id="cat-new" placeholder="Name"><button class="btn primary" id="cat-add">Add</button></div>
+          <div class="table-wrap" style="margin-top:12px"><table style="min-width:0"><thead><tr><th>Name</th><th>Products</th><th></th></tr></thead><tbody id="cat-tbody"></tbody></table></div>
+        </div>
       </div>
     </section>
 
@@ -312,7 +359,8 @@
       <div class="full"><label>Medicine Name * (brand + strength)</label><input type="text" id="med-name" placeholder="jastai Paracetamol 500mg"></div>
       <div><label>Generic / Salt Name</label><input type="text" id="med-generic"></div>
       <div><label>Manufacturer / Company</label><input type="text" id="med-manufacturer"></div>
-      <div><label>Category (form)</label>
+      <div><label>Brand</label><select id="med-brand"></select></div>
+      <div><label>Category</label>
         <select id="med-category"><option>Tablet</option><option>Syrup</option><option>Capsule</option><option>Injection</option><option>Ointment</option><option>Drops</option><option>Other</option></select></div>
       <div><label>Selling Unit</label>
         <select id="med-unit"><option>Strip</option><option>Tablet</option><option>Capsule</option><option>Bottle</option><option>Vial</option><option>Tube</option><option>Sachet</option><option>Box</option><option>Piece</option></select></div>
