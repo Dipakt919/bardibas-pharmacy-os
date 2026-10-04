@@ -81,6 +81,10 @@
         <button class="ptab-btn" data-ptab="categories">Categories</button>
         <button class="ptab-btn" data-ptab="brands">Brands</button>
         <button class="ptab-btn" data-ptab="units">Units</button>
+        <button class="ptab-btn" data-ptab="adjust">Stock Adjustments</button>
+        <button class="ptab-btn" data-ptab="stocktake">Stock Take</button>
+        <button class="ptab-btn" data-ptab="locations">Locations</button>
+        <button class="ptab-btn" data-ptab="insights">Insights</button>
       </div>
 
       <!-- Overview -->
@@ -134,6 +138,63 @@
           <span id="pager-info"></span>
           <button class="btn sm" id="pg-next">Next ›</button>
         </div>
+      </div>
+
+      <!-- Stock Adjustments -->
+      <div id="ptab-adjust" class="ptab">
+        <div class="panel">
+          <h2>New stock adjustment</h2>
+          <div class="form-grid four">
+            <div><label>Product</label><select id="adj-product"></select></div>
+            <div><label>Batch</label><select id="adj-batch"></select></div>
+            <div><label>Type</label><select id="adj-type"><option>Damage</option><option>Expired write-off</option><option>Theft / Loss</option><option>Found / Add</option><option>Correction (set qty)</option></select></div>
+            <div><label>Qty</label><input type="number" id="adj-qty" min="0"></div>
+            <div class="full"><label>Reason / note</label><input type="text" id="adj-reason" placeholder="jastai: futeko, rat le khayo..."></div>
+          </div>
+          <button class="btn primary" id="adj-save" style="margin-top:12px">Save adjustment</button>
+        </div>
+        <h2 style="margin-top:18px">Recent adjustments</h2>
+        <div class="table-wrap"><table><thead><tr><th>Date</th><th>Product</th><th>Batch</th><th>Type</th><th>Change</th><th>Note</th></tr></thead><tbody id="adj-tbody"></tbody></table></div>
+      </div>
+
+      <!-- Stock Take -->
+      <div id="ptab-stocktake" class="ptab">
+        <p class="hint">Shelf ma gari asli qty gana ra yaha halnu hos. Count nagareka item ma kei farak pardaina (cycle count).</p>
+        <div class="filter-bar">
+          <select id="st-scope"></select>
+          <button class="btn primary" id="st-start">Start count</button>
+          <button class="btn" id="st-apply">Apply variances</button>
+        </div>
+        <div class="table-wrap"><table><thead><tr><th>Product</th><th>Batch</th><th>Expiry</th><th>System</th><th>Counted</th><th>Variance</th></tr></thead><tbody id="st-tbody"></tbody></table></div>
+      </div>
+
+      <!-- Locations + Transfers -->
+      <div id="ptab-locations" class="ptab">
+        <div class="panel" style="margin-bottom:16px">
+          <h2>Move product to another rack</h2>
+          <div class="filter-bar" style="margin:0">
+            <select id="tr-product" style="flex:1 1 260px"></select>
+            <input type="text" id="tr-to" list="tr-racks" placeholder="Naya rack (jastai B-3)" style="flex:1 1 180px">
+            <datalist id="tr-racks"></datalist>
+            <button class="btn primary" id="tr-move">Move</button>
+          </div>
+        </div>
+        <div class="table-wrap"><table><thead><tr><th>Rack / Location</th><th>Products</th><th>Units</th><th>Stock value (cost)</th></tr></thead><tbody id="loc-tbody"></tbody></table></div>
+      </div>
+
+      <!-- Insights -->
+      <div id="ptab-insights" class="ptab">
+        <div class="stat-grid">
+          <div class="stat-card warn"><div class="stat-label">Reorder needed</div><div class="stat-value" id="in-reorder">0</div><div class="stat-sub">Low stock ya 14 din bhanda kam cover</div></div>
+          <div class="stat-card danger"><div class="stat-label">Expiry risk</div><div class="stat-value" id="in-risk">Rs. 0</div><div class="stat-sub">Near-expiry stock ko cost</div></div>
+          <div class="stat-card"><div class="stat-label">Dead stock</div><div class="stat-value" id="in-dead">Rs. 0</div><div class="stat-sub">90 din ma kehi nabikeko</div></div>
+          <div class="stat-card good"><div class="stat-label">A-class products</div><div class="stat-value" id="in-a">0</div><div class="stat-sub">90 din ko 70% bikri dine</div></div>
+        </div>
+        <div class="quick-row"><h2 style="flex:1;margin:0">Reorder suggestions</h2>
+          <button class="btn sm" id="in-export">Export</button><button class="btn primary sm" id="in-po">Create purchase draft</button></div>
+        <div class="table-wrap"><table><thead><tr><th>Product</th><th>Stock</th><th>Reorder lvl</th><th>Sold 30d</th><th>Cover</th><th>Suggest</th><th>ABC</th></tr></thead><tbody id="in-reorder-tbody"></tbody></table></div>
+        <h2 style="margin-top:20px">Dead stock (90 din)</h2>
+        <div class="table-wrap"><table><thead><tr><th>Product</th><th>Qty</th><th>Value (cost)</th><th>Last sold</th></tr></thead><tbody id="in-dead-tbody"></tbody></table></div>
       </div>
 
       <!-- Categories / Brands / Units -->

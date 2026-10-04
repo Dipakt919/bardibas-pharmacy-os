@@ -31,6 +31,7 @@ let purchaseDrafts = DB.get('purchaseDrafts', []);
 let activityLog = DB.get('activityLog', []);
 let categories = DB.get('categories', ['Tablet', 'Syrup', 'Capsule', 'Injection', 'Ointment', 'Drops', 'Other']);
 let brands = DB.get('brands', []);
+let stockLog = DB.get('stockLog', []);
 let units = DB.get('units', ['Strip', 'Tablet', 'Capsule', 'Bottle', 'Vial', 'Tube', 'Sachet', 'Box', 'Piece']);
 
 function save() {
@@ -44,6 +45,7 @@ function save() {
   DB.set('activityLog', activityLog);
   DB.set('categories', categories);
   DB.set('brands', brands);
+  DB.set('stockLog', stockLog);
   DB.set('units', units);
 }
 
@@ -197,9 +199,7 @@ function productFilters() {
 function setPTab(t) {
   ptab = t;
   document.querySelectorAll('.ptab-btn').forEach(b => b.classList.toggle('active', b.dataset.ptab === t));
-  $('ptab-overview').classList.toggle('active', t === 'overview');
-  $('ptab-list').classList.toggle('active', t === 'list');
-  $('ptab-catalog').classList.toggle('active', t in CAT);
+  document.querySelectorAll('.ptab').forEach(el => el.classList.toggle('active', el.id === 'ptab-' + (t in CAT ? 'catalog' : t)));
   renderMedicineTable();
 }
 document.querySelectorAll('.ptab-btn').forEach(b => b.addEventListener('click', () => setPTab(b.dataset.ptab)));
@@ -249,6 +249,7 @@ function renderMedicineTable() {
   }).join('') : `<tr><td colspan="12" style="text-align:center;color:var(--text-muted);padding:24px;">Kunai product fela parena</td></tr>`;
   renderProductOverview(all);
   renderCatalogTab(all);
+  renderExtraTab();
 }
 
 ['medicine-search', 'pf-cat', 'pf-stock', 'pf-inactive'].forEach(id => $(id).addEventListener('input', () => { listPage = 0; renderMedicineTable(); }));
@@ -335,10 +336,143 @@ function productAction(act, key) {
       if (i.returnedQty) mv.push({ d: s.date, t: 'Return', ref: s.invoiceNo, batch: i.batch, q: i.returnedQty });
       if (s.status === 'Cancelled') mv.push({ d: s.cancelledDate || s.date, t: 'Sale cancelled', ref: s.invoiceNo, batch: i.batch, q: i.qty - (i.returnedQty || 0) });
     }));
+    stockLog.filter(x => sameName(x.name, g.name)).forEach(x => mv.push({ d: x.date, t: x.type, ref: x.reason || '-', batch: x.batch, q: x.delta }));
     mv.sort((a, b) => new Date(b.d) - new Date(a.d));
     return showGeneric('Movement History - ' + g.name, `<div class="table-wrap" style="max-height:360px;overflow:auto"><table style="min-width:420px"><thead><tr><th>Date</th><th>Type</th><th>Ref</th><th>Batch</th><th>Qty</th></tr></thead><tbody>${
       mv.map(x => `<tr><td>${fmtDate(x.d)}</td><td>${x.t}</td><td>${esc(x.ref)}</td><td>${esc(x.batch)}</td><td style="color:${x.q < 0 ? 'var(--red)' : 'var(--accent)'}">${x.q > 0 ? '+' : ''}${x.q}</td></tr>`).join('') || '<tr><td colspan="5" style="text-align:center;color:var(--text-muted)">Kunai movement chaina</td></tr>'}</tbody></table></div>`);
   }
+}
+
+
+/* ---- Extra tabs: Adjustments, Stock Take, Locations/Transfer, Insights ---- */
+const keyOf = n => String(n).trim().toLowerCase();
+const emptyRow = (cols, msg) => `<tr><td colspan="${cols}" style="text-align:center;color:var(--text-muted);padding:18px;">${msg}</td></tr>`;
+const keepSel = (id, html) => { const c = $(id).value; $(id).innerHTML = html; if (c) $(id).value = c; };
+
+function adjustStock(m, delta, type, reason) {
+  m.qty += delta;
+  stockLog.push({ id: uid(), date: new Date().toISOString(), name: m.name, batch: m.batch, type, delta, reason: reason || '' });
+  if (stockLog.length > 1000) stockLog.shift();
+  logAct(`${type}: ${m.name} (${m.batch}) ${delta > 0 ? '+' : ''}${delta}`);
+}
+
+function salesStats() {
+  const now = Date.now(), map = new Map();
+  sales.forEach(s => {
+    if (s.status === 'Cancelled') return;
+    const age = (now - new Date(s.date)) / 864e5;
+    s.items.forEach(i => {
+      const k = keyOf(i.name), q = i.qty - (i.returnedQty || 0);
+      const e = map.get(k) || { s30: 0, s90: 0, rev90: 0, last: 0 }; map.set(k, e);
+      if (age <= 30) e.s30 += q;
+      if (age <= 90) { e.s90 += q; e.rev90 += q * i.rate; }
+      e.last = Math.max(e.last, +new Date(s.date));
+    });
+  });
+  return map;
+}
+
+/* Adjustments */
+function renderAdjust() {
+  keepSel('adj-product', getDistinctProducts().map(m => `<option value="${esc(m.name)}">${esc(m.name)}</option>`).join(''));
+  fillAdjBatches();
+  const rows = [...stockLog].reverse().slice(0, 100);
+  $('adj-tbody').innerHTML = rows.length ? rows.map(x => `<tr><td>${fmtDate(x.date)}</td><td>${esc(x.name)}</td><td>${esc(x.batch)}</td><td>${esc(x.type)}</td>
+    <td style="color:${x.delta < 0 ? 'var(--red)' : 'var(--accent)'}">${x.delta > 0 ? '+' : ''}${x.delta}</td><td>${esc(x.reason)}</td></tr>`).join('') : emptyRow(6, 'Kunai adjustment chaina');
+}
+function fillAdjBatches() {
+  keepSel('adj-batch', medicines.filter(m => sameName(m.name, $('adj-product').value)).sort((a, b) => a.expiry.localeCompare(b.expiry))
+    .map(m => `<option value="${esc(m.batch)}">${esc(m.batch)} (exp ${esc(m.expiry)}, qty ${m.qty})</option>`).join(''));
+}
+$('adj-product').addEventListener('change', fillAdjBatches);
+$('adj-save').addEventListener('click', () => {
+  const m = medicines.find(x => sameName(x.name, $('adj-product').value) && sameName(x.batch, $('adj-batch').value));
+  const type = $('adj-type').value, q = parseFloat($('adj-qty').value), reason = val('adj-reason');
+  if (!m || isNaN(q) || q < 0) return showToast('Product, batch ra qty sahi halnu hos');
+  let delta = type === 'Found / Add' ? q : type === 'Correction (set qty)' ? q - m.qty : -q;
+  if (!delta) return showToast('Qty ma kei pharak chaina');
+  if (m.qty + delta < 0) return showToast('Stock bhanda badhi ghatauna milena (xa: ' + m.qty + ')');
+  adjustStock(m, delta, type, reason);
+  save(); $('adj-qty').value = ''; $('adj-reason').value = ''; renderMedicineTable(); showToast('Adjustment save bhayo');
+});
+
+/* Stock take (cycle count) */
+let stRows = [];
+function renderStockTake() {
+  const racks = [...new Set(medicines.map(m => m.rack || 'Unassigned'))].sort();
+  keepSel('st-scope', '<option value="">All products</option>' + categories.map(c => `<option value="cat:${esc(c)}">Category: ${esc(c)}</option>`).join('') + racks.map(r => `<option value="rack:${esc(r)}">Rack: ${esc(r)}</option>`).join(''));
+  $('st-tbody').innerHTML = stRows.length ? stRows.map((r, i) => `<tr><td>${esc(r.m.name)}</td><td>${esc(r.m.batch)}</td><td>${esc(r.m.expiry)}</td><td>${r.sys}</td>
+    <td><input type="number" min="0" class="st-in" data-i="${i}" value="${r.counted}" style="width:80px"></td><td id="st-var-${i}">${stVar(r)}</td></tr>`).join('') : emptyRow(6, 'Scope chhanera "Start count" thichnu hos');
+}
+const stVar = r => r.counted === '' ? '-' : (r.counted - r.sys > 0 ? '+' : '') + (r.counted - r.sys);
+$('st-start').addEventListener('click', () => {
+  const [kind, ...rest] = $('st-scope').value.split(':'), v = rest.join(':');
+  stRows = medicines.filter(m => m.active !== false && (!kind || (kind === 'cat' ? m.category === v : (m.rack || 'Unassigned') === v)))
+    .sort((a, b) => a.name.localeCompare(b.name) || a.expiry.localeCompare(b.expiry)).map(m => ({ m, sys: m.qty, counted: '' }));
+  renderStockTake(); showToast(stRows.length + ' batch count sheet ma');
+});
+$('st-tbody').addEventListener('input', e => {
+  const i = e.target.dataset.i; if (i === undefined) return;
+  stRows[i].counted = e.target.value === '' ? '' : parseFloat(e.target.value);
+  $('st-var-' + i).textContent = stVar(stRows[i]);
+});
+$('st-apply').addEventListener('click', () => {
+  const diff = stRows.filter(r => r.counted !== '' && !isNaN(r.counted) && r.counted !== r.m.qty);
+  if (!diff.length) return showToast('Apply garne variance chaina');
+  if (!confirm(diff.length + ' batch ko stock count anusar milaune? (count nagareka item ma kei farak pardaina)')) return;
+  diff.forEach(r => adjustStock(r.m, r.counted - r.m.qty, 'Stock take', 'Physical count'));
+  stRows = []; save(); renderMedicineTable(); showToast('Stock take apply bhayo');
+});
+
+/* Locations + transfer */
+function renderLocations() {
+  const g = groupProducts(), map = new Map();
+  g.forEach(p => { const r = p.p.rack || 'Unassigned'; const e = map.get(r) || { n: 0, u: 0, v: 0 }; e.n++; e.u += p.qty; e.v += p.batches.reduce((a, b) => a + b.qty * b.purchasePrice, 0); map.set(r, e); });
+  $('loc-tbody').innerHTML = [...map].sort().map(([r, e]) => `<tr><td>${esc(r)}</td><td>${e.n}</td><td>${e.u}</td><td>${rs(e.v)}</td></tr>`).join('') || emptyRow(4, 'Product chaina');
+  keepSel('tr-product', g.map(p => `<option value="${esc(p.key)}">${esc(p.name)} (${esc(p.p.rack || 'Unassigned')})</option>`).join(''));
+  $('tr-racks').innerHTML = [...map.keys()].filter(r => r !== 'Unassigned').map(r => `<option value="${esc(r)}">`).join('');
+}
+$('tr-move').addEventListener('click', () => {
+  const k = $('tr-product').value, to = val('tr-to');
+  if (!k || !to) return showToast('Product ra naya rack halnu hos');
+  medicines.forEach(m => { if (keyOf(m.name) === k) m.rack = to === 'Unassigned' ? '' : to; });
+  logAct('Rack transfer: ' + k + ' -> ' + to); save(); $('tr-to').value = ''; renderMedicineTable(); showToast('Rack ' + to + ' ma sariyo');
+});
+
+/* Insights: reorder, ABC, dead stock */
+let reorderList = [];
+function renderInsights() {
+  const stats = salesStats(), g = groupProducts().filter(p => p.active);
+  const ranked = g.map(p => ({ p, rev: stats.get(p.key)?.rev90 || 0 })).sort((a, b) => b.rev - a.rev);
+  const total = ranked.reduce((a, x) => a + x.rev, 0); let cum = 0; const abc = new Map();
+  ranked.forEach(x => { cum += x.rev; abc.set(x.p.key, x.rev === 0 ? 'C' : cum - x.rev < total * 0.7 ? 'A' : cum - x.rev < total * 0.9 ? 'B' : 'C'); });
+  reorderList = g.map(p => {
+    const s = stats.get(p.key) || { s30: 0, s90: 0, last: 0 }, cover = s.s30 ? p.qty / (s.s30 / 30) : Infinity;
+    const need = p.status !== 'in' || cover < 14;
+    return { p, s, cover, need, suggest: Math.max(Math.max(p.reorder * 2, Math.ceil(s.s30 * 1.5)) - p.qty, 1) };
+  }).filter(x => x.need).sort((a, b) => a.cover - b.cover);
+  const dead = g.filter(p => p.qty > 0 && !(stats.get(p.key)?.s90)).map(p => ({ p, v: p.batches.reduce((a, b) => a + b.qty * b.purchasePrice, 0), last: stats.get(p.key)?.last }))
+    .sort((a, b) => b.v - a.v);
+  const risk = medicines.filter(m => m.qty > 0 && daysUntil(m.expiry) <= settings.expiryDays).reduce((a, m) => a + m.qty * m.purchasePrice, 0);
+  $('in-reorder').textContent = reorderList.length;
+  $('in-risk').textContent = lakh(risk);
+  $('in-dead').textContent = lakh(dead.reduce((a, x) => a + x.v, 0));
+  $('in-a').textContent = [...abc.values()].filter(x => x === 'A').length;
+  $('in-reorder-tbody').innerHTML = reorderList.length ? reorderList.slice(0, 100).map(x => `<tr><td>${esc(x.p.name)}</td><td>${x.p.qty}</td><td>${x.p.reorder}</td><td>${x.s.s30}</td>
+    <td>${x.cover === Infinity ? '-' : Math.round(x.cover) + ' din'}</td><td><b>${x.suggest}</b></td><td>${abc.get(x.p.key)}</td></tr>`).join('') : emptyRow(7, 'Abhi reorder garnu parne kei chaina');
+  $('in-dead-tbody').innerHTML = dead.length ? dead.slice(0, 100).map(x => `<tr><td>${esc(x.p.name)}</td><td>${x.p.qty}</td><td>${rs(x.v)}</td><td>${x.last ? fmtDate(x.last) : 'Kahile bikena'}</td></tr>`).join('') : emptyRow(4, 'Dead stock chaina');
+}
+$('in-po').addEventListener('click', () => {
+  if (!reorderList.length) return showToast('Reorder list khali xa');
+  purchaseDrafts.push({ id: uid(), saved: new Date().toISOString(), supplierId: '', invoiceNo: 'REORDER', date: todayISO(), payment: 'Cash', paid: '',
+    lines: reorderList.map(x => ({ product: x.p.name, batch: '', expiry: '', qty: x.suggest, free: 0, rate: x.p.ref.purchasePrice, disc: 0, mrp: mrpOf(x.p.ref), sell: x.p.ref.sellPrice })) });
+  save(); updateDraftCounts(); showToast(reorderList.length + ' item ko purchase draft bannyo (Purchase > Drafts)');
+});
+$('in-export').addEventListener('click', () => exportTable('reorder_' + todayISO(), 'Reorder', ['Product', 'Stock', 'Reorder level', 'Sold 30d', 'Suggested qty'],
+  reorderList.map(x => [x.p.name, x.p.qty, x.p.reorder, x.s.s30, x.suggest])));
+
+function renderExtraTab() {
+  ({ adjust: renderAdjust, stocktake: renderStockTake, locations: renderLocations, insights: renderInsights })[ptab]?.();
 }
 
 /* ---- Categories / Brands / Units ---- */
@@ -1347,7 +1481,7 @@ $('import-file').addEventListener('change', async e => {
 });
 
 $('btn-backup').addEventListener('click', () => {
-  downloadBlob(new Blob([JSON.stringify({ app: 'pharmacy-os', version: 2, exported: new Date().toISOString(), medicines, suppliers, sales, purchases, settings, salesDrafts, purchaseDrafts, activityLog, categories, brands, units })], { type: 'application/json' }), 'pharmacy_backup_' + todayISO() + '.json');
+  downloadBlob(new Blob([JSON.stringify({ app: 'pharmacy-os', version: 2, exported: new Date().toISOString(), medicines, suppliers, sales, purchases, settings, salesDrafts, purchaseDrafts, activityLog, categories, brands, units, stockLog })], { type: 'application/json' }), 'pharmacy_backup_' + todayISO() + '.json');
   showToast('Backup download bhayo');
 });
 $('btn-restore').addEventListener('click', () => $('restore-file').click());
@@ -1358,7 +1492,7 @@ $('restore-file').addEventListener('change', async e => {
     if (d.app !== 'pharmacy-os' || !Array.isArray(d.medicines) || !Array.isArray(d.sales)) throw new Error('bad');
     if (!confirm(`Restore garda abhiko sabai data replace huncha.\nBackup: ${d.medicines.length} batch, ${d.sales.length} sale. Continue?`)) return;
     medicines = d.medicines; suppliers = d.suppliers || []; sales = d.sales; purchases = d.purchases || []; settings = d.settings || settings;
-    categories = d.categories || categories; brands = d.brands || []; units = d.units || units; salesDrafts = d.salesDrafts || []; purchaseDrafts = d.purchaseDrafts || []; activityLog = d.activityLog || [];
+    categories = d.categories || categories; brands = d.brands || []; units = d.units || units; stockLog = d.stockLog || []; salesDrafts = d.salesDrafts || []; purchaseDrafts = d.purchaseDrafts || []; activityLog = d.activityLog || [];
     save(); location.reload();
   } catch (err) { showToast('Backup file valid xaina'); }
 });
