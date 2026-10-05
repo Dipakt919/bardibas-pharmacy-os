@@ -13,7 +13,7 @@ let medicines = DB.get('medicines', []);
 let suppliers = DB.get('suppliers', []);
 let sales = DB.get('sales', []);
 let purchases = DB.get('purchases', []);
-let settings = Object.assign({
+let settings = DB.get('settings', {
   name: 'Bardibas Pharmacy',
   address: '',
   dda: '',
@@ -21,11 +21,8 @@ let settings = Object.assign({
   pan: '',
   contact: '',
   lowStockThreshold: 10,
-  expiryDays: 90,
-  loyaltyPer: 100,    // 1 point per Rs. 100 spent (0 = loyalty off)
-  loyaltyValue: 1,    // 1 point = Rs. 1 when redeemed
-  roundOff: false
-}, DB.get('settings', {}));
+  expiryDays: 90
+});
 
 let cart = [];
 let editingMedicineId = null;
@@ -35,7 +32,8 @@ let activityLog = DB.get('activityLog', []);
 let categories = DB.get('categories', ['Tablet', 'Syrup', 'Capsule', 'Injection', 'Ointment', 'Drops', 'Other']);
 let brands = DB.get('brands', []);
 let stockLog = DB.get('stockLog', []);
-let customers = DB.get('customers', []);
+let shift = DB.get('shift', null);
+let shifts = DB.get('shifts', []);
 let units = DB.get('units', ['Strip', 'Tablet', 'Capsule', 'Bottle', 'Vial', 'Tube', 'Sachet', 'Box', 'Piece']);
 
 function save() {
@@ -50,7 +48,8 @@ function save() {
   DB.set('categories', categories);
   DB.set('brands', brands);
   DB.set('stockLog', stockLog);
-  DB.set('customers', customers);
+  DB.set('shift', shift);
+  DB.set('shifts', shifts);
   DB.set('units', units);
 }
 
@@ -77,11 +76,11 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
     document.getElementById('page-' + btn.dataset.page).classList.add('active');
     if (btn.dataset.page === 'dashboard') renderDashboard();
     if (btn.dataset.page === 'medicines') renderMedicineTable();
-    if (btn.dataset.page === 'billing') { renderPos(); setTimeout(() => billingSearch.focus(), 50); }
     if (btn.dataset.page === 'suppliers') renderSupplierTable();
     if (btn.dataset.page === 'purchase') renderPurchaseTable();
     if (btn.dataset.page === 'reports') renderReports();
     if (btn.dataset.page === 'settings') loadSettingsForm();
+    if (btn.dataset.page === 'billing') renderQuick();
   });
 });
 
@@ -495,7 +494,6 @@ function avatarHtml(name, img, cls) {
 function setMTab(t) {
   document.querySelectorAll('.mtab-btn').forEach(b => b.classList.toggle('active', b.dataset.mtab === t));
   document.querySelectorAll('.mtab').forEach(p => p.classList.toggle('active', p.id === 'mtab-' + t));
-  const body = document.querySelector('#modal-medicine .modal-body'); if (body) body.scrollTop = 0;
 }
 document.querySelectorAll('.mtab-btn').forEach(b => b.addEventListener('click', () => setMTab(b.dataset.mtab)));
 
@@ -507,19 +505,17 @@ function updatePreview() {
   $('pv-price').textContent = isNaN(s) ? 'Rs. -' : rs(s);
   $('pv-margin').textContent = (!isNaN(s) && !isNaN(p) && s > 0) ? 'Margin ' + ((s - p) / s * 100).toFixed(1) + '%' : '';
 }
-$('modal-medicine').addEventListener('input', e => { e.target.classList.remove('invalid'); if (!document.querySelector('#modal-medicine .mtab.active .invalid')) document.querySelector('.mtab-btn.active')?.classList.remove('has-err'); updatePreview(); });
+$('modal-medicine').addEventListener('input', e => { e.target.classList.remove('invalid'); updatePreview(); });
 $('modal-medicine').addEventListener('change', updatePreview);
 
 function jumpToMissing() {
   document.querySelectorAll('#modal-medicine .invalid').forEach(e => e.classList.remove('invalid'));
-  document.querySelectorAll('.mtab-btn').forEach(b => b.classList.remove('has-err'));
   const order = [['general', ['med-name']], ['pricing', ['med-mrp', 'med-purchase-price', 'med-sell-price']], ['stock', ['med-batch', 'med-expiry', 'med-qty']]];
   const text = ['med-name', 'med-batch', 'med-expiry']; let first = true;
   order.forEach(([tab, ids]) => ids.forEach(id => {
     const bad = text.includes(id) ? !$(id).value.trim() : isNaN(parseFloat($(id).value));
     if (!bad) return;
     $(id).classList.add('invalid');
-    document.querySelector(`.mtab-btn[data-mtab="${tab}"]`)?.classList.add('has-err');
     if (first) { setMTab(tab); $(id).focus(); first = false; }
   }));
   showToast('Rato border bhayeko required (*) field bharnu hos');
@@ -646,9 +642,7 @@ function fillMedicineForm(m) {
   $('med-storage').value = m.storage || ''; $('med-controlled').checked = !!m.controlled; $('med-packsize').value = m.packSize || '';
   $('med-maxstock').value = m.maxStock ?? ''; $('med-tags').value = m.tags || ''; $('med-notes').value = m.notes || '';
   document.querySelectorAll('#modal-medicine .invalid').forEach(e => e.classList.remove('invalid'));
-  document.querySelectorAll('.mtab-btn').forEach(b => b.classList.remove('has-err'));
   setMTab('general'); updateMargin(); updatePreview();
-  $('modal-medicine').querySelector('.modal-body').scrollTop = 0;
 }
 
 function openAddMedicine() {
@@ -1085,537 +1079,462 @@ window.deletePurDraft = function (id) {
 $('btn-pur-drafts').addEventListener('click', showPurchaseDrafts);
 ['pf-from', 'pf-to', 'pf-supplier', 'pf-q'].forEach(id => $(id).addEventListener('input', renderPurchaseTable));
 
-/* ============ BILLING / POS ============ */
-const billingSearch = $('billing-search');
-const PAY_MODES = ['Cash', 'Card', 'eSewa', 'Fonepay', 'Credit'];
-const DIGITAL = ['Card', 'eSewa', 'Fonepay'];
-let resumingSaleDraftId = null, posCat = 'top', searchHits = [], hitIdx = -1;
-let currentCustomer = null, usePoints = false, currentInvoice = null, lastInvoice = null, lastAddedId = null;
-let posTiles = [];
+/* ============ BILLING ============ */
+const billingSearch = document.getElementById('billing-search');
 
-const r2 = n => Math.round((n + Number.EPSILON) * 100) / 100;
-const digits = v => String(v || '').replace(/\D/g, '');
-const medById = id => medicines.find(x => x.id === id);
-const sellableOf = name => medicines.filter(m => sameName(m.name, name) && m.active !== false && m.qty > 0 && daysUntil(m.expiry) >= 0)
-  .sort((a, b) => a.expiry.localeCompare(b.expiry)); // FEFO: first-expiry-first-out
-const lineEff = c => c.rate * (1 - (c.discPct || 0) / 100);
-const lineAmt = c => c.qty * lineEff(c);
-const isRx = m => !!m && (m.drugClass === 'A' || !!m.controlled);
-
-/* ---- credit helpers (also used by Reports) ---- */
-function creditOf(s) { return s.creditAmt ?? (s.paymentMode === 'Credit' ? s.total : 0); }
-function creditDue(s) { return (s.status === 'Cancelled' || s.creditPaid) ? 0 : Math.min(creditOf(s), saleNet(s)); }
-function payLabel(s) {
-  if ((s.payments || []).length > 1) return 'Split (' + s.payments.map(p => p.mode + ' ' + Math.round(p.amt)).join(' + ') + ')';
-  return s.paymentMode;
+function sellableBatches(q) {
+  q = q.toLowerCase();
+  return medicines.filter(m => m.active !== false && m.qty > 0 && daysUntil(m.expiry) >= 0 &&
+    (m.name.toLowerCase().includes(q) || (m.sku || '').toLowerCase().includes(q) ||
+     (m.barcode || '').toLowerCase().includes(q) || (m.generic || '').toLowerCase().includes(q)))
+    .sort((a, b) => a.name.localeCompare(b.name) || a.expiry.localeCompare(b.expiry)); // FEFO: earliest expiry first
 }
 
-/* ---- customers + loyalty ---- */
-function findCustomer(name, phone) {
-  const d = digits(phone);
-  if (d) { const c = customers.find(x => digits(x.phone) === d); if (c) return c; }
-  if (name) return customers.find(x => sameName(x.name, name) && (!d || !x.phone)) || null;
-  return null;
-}
-function upsertCustomer(name, phone) {
-  if (!name && !phone) return null;
-  let c = findCustomer(name, phone);
-  if (!c) { c = { id: uid(), name: name || phone, phone: phone || '', points: 0, created: new Date().toISOString() }; customers.push(c); }
-  else { if (phone && !c.phone) c.phone = phone; if (name && (!c.name || c.name === c.phone)) c.name = name; }
-  return c;
-}
-function customerDue(name, phone) {
-  const d = digits(phone);
-  if (!d && !name) return 0;
-  return sales.filter(s => d ? digits(s.customerPhone) === d : sameName(s.customerName, name)).reduce((a, s) => a + creditDue(s), 0);
-}
-function migrateCustomers() {
-  if (customers.length || !sales.length) return;
-  sales.forEach(s => { if (s.customerName || s.customerPhone) { const c = upsertCustomer(s.customerName || '', s.customerPhone || ''); if (c && !s.customerId) s.customerId = c.id; } });
-  save();
-}
-function fillCustomerList() {
-  $('cust-list').innerHTML = customers.map(c => `<option value="${esc(c.name)}">${esc(c.phone || '')}</option>`).join('');
-}
-function refreshCustomer() {
-  const name = val('billing-customer-name'), phone = val('billing-customer-phone');
-  currentCustomer = (name || phone) ? findCustomer(name, phone) : null;
-  if (!currentCustomer || !(currentCustomer.points > 0)) usePoints = false;
-  const due = customerDue(name, phone), rv = settings.loyaltyValue || 1;
-  let h = '';
-  if (currentCustomer && settings.loyaltyPer > 0) h += `<span class="cbadge pts">⭐ ${currentCustomer.points || 0} pts</span>`;
-  if (due > 0) h += `<span class="cbadge due">Udharo baaki ${rs(due)}</span>`;
-  if (currentCustomer && currentCustomer.points > 0) h += `<label class="cbadge use"><input type="checkbox" id="use-points" ${usePoints ? 'checked' : ''}> Use points (${rs(currentCustomer.points * rv)})</label>`;
-  if (!currentCustomer && (name || phone)) h += `<span class="cbadge new">Naya customer — bill ma save huncha</span>`;
-  $('cust-info').innerHTML = h;
-  updateBillSummary();
-}
-$('cust-info').addEventListener('change', e => { if (e.target.id === 'use-points') { usePoints = e.target.checked; updateBillSummary(); } });
-$('billing-customer-name').addEventListener('input', refreshCustomer);
-$('billing-customer-phone').addEventListener('input', refreshCustomer);
-$('billing-customer-name').addEventListener('change', () => {
-  const c = findCustomer(val('billing-customer-name'), '');
-  if (c && !val('billing-customer-phone') && c.phone) $('billing-customer-phone').value = c.phone;
-  refreshCustomer();
+billingSearch.addEventListener('input', () => {
+  const q = billingSearch.value.trim();
+  const resultsEl = document.getElementById('billing-search-results');
+  if (!q) { resultsEl.innerHTML = ''; return; }
+  const matches = sellableBatches(q).slice(0, 10);
+  resultsEl.innerHTML = matches.length ? matches.map(m =>
+    `<div class="search-result-item" onclick="addToCart('${m.id}')">
+      ${esc(m.name)} <span class="sr-meta">(Batch ${esc(m.batch)}, Exp ${esc(m.expiry)}, Stock: ${m.qty}, Rs.${m.sellPrice}${daysUntil(m.expiry) <= settings.expiryDays ? ' ⚠ near expiry' : ''})</span>
+    </div>`).join('') : `<div class="search-result-item sr-meta">Kunai medicine fela parena (ya stock sakiyo / expire bhayo)</div>`;
 });
-
-/* ---- product grid + search ---- */
-function posProducts() {
-  const map = new Map();
-  medicines.forEach(m => {
-    if (m.active === false) return;
-    const k = m.name.trim().toLowerCase();
-    let g = map.get(k); if (!g) { g = { key: k, name: m.name, batches: [], qty: 0, p: m }; map.set(k, g); }
-    if (m.qty > 0 && daysUntil(m.expiry) >= 0) { g.batches.push(m); g.qty += m.qty; }
-  });
-  const arr = [...map.values()];
-  arr.forEach(g => { g.batches.sort((a, b) => a.expiry.localeCompare(b.expiry)); g.ref = g.batches[0] || g.p; });
-  return arr;
-}
-function topSellers() {
-  const since = Date.now() - 60 * 86400000, map = {};
-  sales.forEach(s => {
-    if (s.status === 'Cancelled' || new Date(s.date) < since) return;
-    s.items.forEach(i => { const k = i.name.trim().toLowerCase(); map[k] = (map[k] || 0) + i.qty - (i.returnedQty || 0); });
-  });
-  return map;
-}
-function renderPosCats() {
-  const cats = [['top', '⭐ Top sellers'], ['all', 'All'], ...categories.map(c => ['c:' + c, c]), ['rx', '℞ Rx / Controlled'], ['exp', '⏳ Near expiry']];
-  $('pos-cats').innerHTML = cats.map(([k, l]) => `<button type="button" class="chip-btn pos-cat ${posCat === k ? 'on' : ''}" data-cat="${esc(k)}">${esc(l)}</button>`).join('');
-}
-$('pos-cats').addEventListener('click', e => { const b = e.target.closest('[data-cat]'); if (!b) return; posCat = b.dataset.cat; renderPosCats(); renderPosGrid(); });
-
-function renderPosGrid() {
-  const all = posProducts(), rank = topSellers(), byName = (a, b) => a.name.localeCompare(b.name);
-  const inFirst = (a, b) => (b.qty > 0) - (a.qty > 0) || byName(a, b);
-  let list;
-  if (posCat === 'top') list = all.filter(g => g.qty > 0).sort((a, b) => (rank[b.key] || 0) - (rank[a.key] || 0) || byName(a, b));
-  else if (posCat === 'rx') list = all.filter(g => isRx(g.p)).sort(inFirst);
-  else if (posCat === 'exp') list = all.filter(g => g.qty > 0 && daysUntil(g.ref.expiry) <= settings.expiryDays).sort((a, b) => a.ref.expiry.localeCompare(b.ref.expiry));
-  else if (posCat.startsWith('c:')) list = all.filter(g => g.p.category === posCat.slice(2)).sort(inFirst);
-  else list = all.sort(inFirst);
-  const total = list.length; list = list.slice(0, 60); posTiles = list;
-  $('pos-grid').innerHTML = list.length ? list.map((g, i) => {
-    const out = g.qty <= 0, d = out ? 999 : daysUntil(g.ref.expiry), low = !out && g.qty <= (g.p.reorderLevel === '' || g.p.reorderLevel == null ? settings.lowStockThreshold : +g.p.reorderLevel);
-    return `<button type="button" class="pos-tile ${out ? 'out' : ''}" data-i="${i}">
-      <span class="pt-top">${avatarHtml(g.name, g.p.image, '')}<span class="pt-chips">${isRx(g.p) ? '<i class="chip rx">℞</i>' : ''}${d <= settings.expiryDays && !out ? '<i class="chip ctl">exp</i>' : ''}</span></span>
-      <span class="pt-name">${esc(g.name)}</span>
-      <span class="pt-sub">${esc(g.p.generic || g.p.category || '')}</span>
-      <span class="pt-foot"><b>${out ? 'Out of stock' : rs(g.ref.sellPrice)}</b><em class="${out ? 'bad' : low ? 'warn' : ''}">${out ? '⇄ Alt' : g.qty + ' left'}</em></span>
-    </button>`;
-  }).join('') + (total > 60 ? `<div class="pos-more">+${total - 60} aru — search garera khojnu hos</div>` : '')
-    : '<div class="alert-empty" style="grid-column:1/-1;padding:24px;text-align:center">Yo section ma kunai product chaina</div>';
-}
-$('pos-grid').addEventListener('click', e => {
-  const t = e.target.closest('[data-i]'); if (!t) return;
-  const g = posTiles[+t.dataset.i]; if (!g) return;
-  if (g.qty > 0) addToCart(g.ref.id, 1); else showAlternatives(g.p.id);
-});
-
-function parseQuery(raw) { const m = raw.match(/^(\d+)\s*\*\s*(.+)$/); return m ? { qty: Math.max(1, +m[1]), q: m[2].trim() } : { qty: 1, q: raw }; }
-function runSearch() {
-  const raw = billingSearch.value.trim(), el = $('billing-search-results');
-  searchHits = []; hitIdx = -1;
-  if (!raw) { el.innerHTML = ''; el.classList.remove('open'); return; }
-  const { qty, q } = parseQuery(raw), toks = q.toLowerCase().split(/\s+/).filter(Boolean);
-  const hay = g => [g.p.name, g.p.sku, g.p.barcode, g.p.generic, g.p.tags, g.p.brand, g.p.manufacturer].join(' ').toLowerCase();
-  const hits = posProducts().filter(g => toks.every(t => hay(g).includes(t)));
-  const ql = q.toLowerCase();
-  const inStock = hits.filter(g => g.qty > 0).sort((a, b) => (b.name.toLowerCase().startsWith(ql)) - (a.name.toLowerCase().startsWith(ql)) || a.name.localeCompare(b.name)).slice(0, 8);
-  const out = hits.filter(g => g.qty <= 0).slice(0, 3);
-  searchHits = [...inStock, ...out];
-  el.classList.add('open');
-  el.innerHTML = searchHits.length ? searchHits.map((g, i) => {
-    const o = g.qty <= 0, d = o ? 999 : daysUntil(g.ref.expiry);
-    return `<div class="search-result-item ${o ? 'out' : ''}" data-h="${i}">
-      <div class="sr-main"><b>${esc(g.name)}</b> ${isRx(g.p) ? '<i class="chip rx">℞</i>' : ''}${d <= settings.expiryDays && !o ? '<i class="chip ctl">near expiry</i>' : ''}<div class="sr-meta">${esc(g.p.generic || '')}${g.p.rack ? ' · Rack ' + esc(g.p.rack) : ''}</div></div>
-      <div class="sr-side">${o ? '<span class="bad">Stock sakiyo · ⇄ Alt</span>' : `<b>${rs(g.ref.sellPrice)}</b><span class="sr-meta">${g.qty} left · exp ${esc(g.ref.expiry)}${qty > 1 ? ' · ×' + qty : ''}</span>`}</div></div>`;
-  }).join('') : `<div class="search-result-item sr-meta">Kunai medicine fela parena (ya stock sakiyo / expire bhayo)</div>`;
-}
-function markHit() { document.querySelectorAll('#billing-search-results [data-h]').forEach(el => el.classList.toggle('hl', +el.dataset.h === hitIdx)); document.querySelector('#billing-search-results .hl')?.scrollIntoView({ block: 'nearest' }); }
-function pickHit(g, qty) { if (g.qty > 0) addToCart(g.ref.id, qty); else showAlternatives(g.p.id); }
-billingSearch.addEventListener('input', runSearch);
-$('billing-search-results').addEventListener('click', e => { const t = e.target.closest('[data-h]'); if (!t) return; pickHit(searchHits[+t.dataset.h], parseQuery(billingSearch.value.trim()).qty); billingSearch.focus(); });
-// Barcode scanner / Enter: exact barcode or SKU goes straight to cart. "5*para" adds quantity 5.
+// Barcode scanner / Enter: exact barcode or SKU match goes straight to cart, otherwise first (earliest-expiry) result
 billingSearch.addEventListener('keydown', e => {
-  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { if (!searchHits.length) return; e.preventDefault(); hitIdx = (hitIdx + (e.key === 'ArrowDown' ? 1 : -1) + searchHits.length) % searchHits.length; markHit(); return; }
-  if (e.key === 'Escape') { billingSearch.value = ''; runSearch(); return; }
   if (e.key !== 'Enter') return;
-  const raw = billingSearch.value.trim(); if (!raw) return;
-  const { qty, q } = parseQuery(raw);
-  const exact = medicines.find(m => m.active !== false && (m.barcode === q || (m.sku || '').toLowerCase() === q.toLowerCase()));
-  if (exact) { const b = sellableOf(exact.name)[0]; if (b) addToCart(b.id, qty); else showAlternatives(exact.id); return; }
-  const g = searchHits[hitIdx >= 0 ? hitIdx : 0];
-  if (g) pickHit(g, qty); else showToast('Medicine fela parena');
+  const q = billingSearch.value.trim();
+  if (!q) return;
+  const list = sellableBatches(q);
+  const exact = list.find(m => m.barcode === q || (m.sku || '').toLowerCase() === q.toLowerCase());
+  const pick = exact || list[0];
+  if (pick) addToCart(pick.id); else showToast('Medicine fela parena');
 });
 
-/* ---- alternatives (same generic) ---- */
-window.showAlternatives = function (medId) {
-  const m = medById(medId); if (!m) return;
-  const gen = (m.generic || '').trim().toLowerCase();
-  const alts = gen ? posProducts().filter(g => g.qty > 0 && !sameName(g.name, m.name) && (g.p.generic || '').trim().toLowerCase() === gen) : [];
-  const body = !gen ? `<div class="alert-empty">Yo product ko Generic / Salt naam save gareko chaina — Products ma generic halepachhi alternative dekhinchha.</div>`
-    : alts.length ? alts.map(g => `<div class="alert-item"><span><b>${esc(g.name)}</b> ${isRx(g.p) ? '<i class="chip rx">℞</i>' : ''}<br><small class="sr-meta">${g.qty} left · exp ${esc(g.ref.expiry)} ${g.p.manufacturer ? '· ' + esc(g.p.manufacturer) : ''}</small></span>
-        <span><b>${rs(g.ref.sellPrice)}</b> <button class="btn sm primary" onclick="addToCart('${g.ref.id}',1);closeModal('modal-generic')">Add</button></span></div>`).join('')
-      : `<div class="alert-empty">Same generic (${esc(m.generic)}) ko aru product stock ma chaina</div>`;
-  showGeneric('⇄ Alternatives for ' + m.name, `<p class="hint">Generic / salt: <b>${esc(m.generic || '—')}</b>. Customer / doctor sanga confirm garera matra substitute dinu hos.</p><div class="alert-list">${body}</div>`, [{ label: 'Close' }]);
-};
-
-/* ---- cart ---- */
-function makeLine(b, qty) {
-  return { medId: b.id, name: b.name, batch: b.batch, expiry: b.expiry, qty, rate: b.sellPrice, mrp: mrpOf(b), discPct: 0, maxQty: b.qty, vatable: isVatable(b) };
-}
-// FEFO: clicking a product uses the earliest-expiry batch; if the batch runs out the rest spills into the next batch automatically.
-window.addToCart = function (medId, qty = 1) {
-  const m0 = medById(medId); if (!m0) return;
-  if (daysUntil(m0.expiry) < 0) { showToast('Expire bhaisakeko medicine bechna milena'); return; }
-  const all = sellableOf(m0.name);
-  const order = [...all.filter(b => b.id === medId), ...all.filter(b => b.id !== medId)];
-  let left = qty, added = 0;
-  for (const b of order) {
-    if (left <= 0) break;
-    const line = cart.find(c => c.medId === b.id), room = b.qty - (line ? line.qty : 0);
-    if (room <= 0) continue;
-    const take = Math.min(room, left);
-    if (line) line.qty += take; else cart.push(makeLine(b, take));
-    left -= take; added += take; lastAddedId = b.id;
+window.addToCart = function (medId) {
+  const m = medicines.find(x => x.id === medId);
+  if (!m) return;
+  if (daysUntil(m.expiry) < 0) { showToast('Expire bhaisakeko medicine bechna milena'); return; }
+  const existing = cart.find(c => c.medId === medId);
+  if (existing) {
+    if (existing.qty < m.qty) existing.qty++; else showToast('Stock bhanda dherai add garna milena');
+  } else {
+    cart.push({ medId, name: m.name, batch: m.batch, expiry: m.expiry, qty: 1, rate: m.sellPrice, maxQty: m.qty, vatable: isVatable(m), disc: 0 });
   }
-  if (left > 0) showToast(added ? `Stock yeti matra xa — ${added} add bhayo` : 'Stock sakiyo ya cart ma maximum xa');
-  billingSearch.value = ''; runSearch(); renderCart();
-  setTimeout(() => { lastAddedId = null; }, 600);
-};
-window.cartStep = function (i, d) {
-  const c = cart[i]; if (!c) return;
-  if (d > 0) addToCart(c.medId, 1);
-  else if (c.qty > 1) { c.qty--; renderCart(); } else removeFromCart(i);
-};
-window.updateCartQty = function (i, val) {
-  const c = cart[i]; if (!c) return;
-  let q = parseInt(val); if (isNaN(q) || q < 1) q = 1;
-  const m = medById(c.medId);
-  if (q > m.qty) { const extra = q - m.qty; c.qty = m.qty; renderCart(); addToCart(c.medId, extra); return; }
-  c.qty = q; renderCart();
-};
-window.setLineRate = function (i, v) {
-  const c = cart[i]; let r = parseFloat(v);
-  if (isNaN(r) || r < 0) r = c.rate;
-  if (c.mrp > 0 && r > c.mrp) { r = c.mrp; showToast('MRP (' + c.mrp + ') bhanda mathi bechna milena'); }
-  c.rate = r; renderCart();
-};
-window.setLineDisc = function (i, v) { let d = parseFloat(v); if (isNaN(d) || d < 0) d = 0; cart[i].discPct = Math.min(d, 100); renderCart(); };
-window.changeBatch = function (i, id) {
-  const line = cart[i], nb = medById(id); if (!line || !nb) return;
-  const ex = cart.findIndex((c, j) => j !== i && c.medId === id);
-  if (ex >= 0) { cart[ex].qty = Math.min(cart[ex].qty + line.qty, nb.qty); cart.splice(i, 1); }
-  else cart[i] = { ...makeLine(nb, Math.min(line.qty, nb.qty)), discPct: line.discPct || 0 };
+  billingSearch.value = '';
+  document.getElementById('billing-search-results').innerHTML = '';
   renderCart();
 };
-window.removeFromCart = function (i) { cart.splice(i, 1); renderCart(); };
 
-function lineHtml(c, i) {
-  const m = medById(c.medId), d = daysUntil(c.expiry), batches = sellableOf(c.name), cost = m ? m.purchasePrice : 0;
-  const loss = lineEff(c) < cost;
-  const expCls = d <= 30 ? 'bad' : d <= settings.expiryDays ? 'warn' : '';
-  return `<div class="cl ${c.medId === lastAddedId ? 'new' : ''}">
-    <div class="cl-top">
-      ${avatarHtml(c.name, m && m.image, '')}
-      <div class="cl-name"><b>${esc(c.name)}</b>
-        <div class="cl-chips">${isRx(m) ? '<i class="chip rx">℞ Rx</i>' : ''}${m && m.controlled ? '<i class="chip ctl">Controlled</i>' : ''}${loss ? '<i class="chip ctl">Loss</i>' : ''}
-          <span class="cl-batch-txt ${expCls}">Exp ${esc(c.expiry)} · ${d}d</span></div></div>
-      <div class="cl-amt">${rs(lineAmt(c))}</div>
-      <button type="button" class="cl-x" title="Remove" onclick="removeFromCart(${i})">×</button>
-    </div>
-    <div class="cl-ctl">
-      <div class="stepper"><button type="button" onclick="cartStep(${i},-1)">−</button><input type="number" min="1" max="${c.maxQty}" value="${c.qty}" onchange="updateCartQty(${i}, this.value)"><button type="button" onclick="cartStep(${i},1)">+</button></div>
-      <label class="cl-f">Rate<input type="number" min="0" step="0.01" value="${c.rate}" onchange="setLineRate(${i}, this.value)"></label>
-      <label class="cl-f">Disc %<input type="number" min="0" max="100" step="0.5" value="${c.discPct || 0}" onchange="setLineDisc(${i}, this.value)"></label>
-      ${batches.length > 1 ? `<label class="cl-f wide">Batch<select onchange="changeBatch(${i}, this.value)">${batches.map(b => `<option value="${b.id}" ${b.id === c.medId ? 'selected' : ''}>${esc(b.batch)} · ${esc(b.expiry)} · ${b.qty}</option>`).join('')}</select></label>`
-        : `<div class="cl-f wide"><span class="sr-meta">Batch ${esc(c.batch)} · ${c.maxQty} stock</span></div>`}
-      <button type="button" class="cl-alt" title="Alternatives (same generic)" onclick="showAlternatives('${c.medId}')">⇄</button>
-    </div></div>`;
+/* ===== POS TERMINAL ===== */
+let lastInvoice = null, posCat = 'all', posLimit = 60;
+const medOf = c => medicines.find(x => x.id === c.medId);
+const netRate = c => Math.round(c.rate * (1 - (c.disc || 0) / 100) * 100) / 100;
+const numOf = id => parseFloat($(id).value) || 0;
+const sellableOf = g => g.batches.filter(b => b.qty > 0 && daysUntil(b.expiry) >= 0);
+
+/* ---- parallel sale tabs ---- */
+const blankSale = () => ({ cart: [], name: '', phone: '', pan: '', disc: 0, dtype: 'Rs', doctor: '', rxNo: '' });
+let saleTabs = [blankSale()], activeSale = 0;
+function captureSale() {
+  saleTabs[activeSale] = { cart, name: val('billing-customer-name'), phone: val('billing-customer-phone'), pan: val('billing-customer-pan'),
+    disc: $('bill-discount').value, dtype: $('bill-disc-type').value, doctor: val('rx-doctor'), rxNo: val('rx-no') };
+}
+function loadSale(i) {
+  activeSale = i; const s = saleTabs[i]; cart = s.cart;
+  $('billing-customer-name').value = s.name; $('billing-customer-phone').value = s.phone; $('billing-customer-pan').value = s.pan;
+  $('bill-discount').value = s.disc; $('bill-disc-type').value = s.dtype; $('rx-doctor').value = s.doctor; $('rx-no').value = s.rxNo;
+  $('bill-payment-mode').value = 'Cash'; renderCart();
+}
+function renderSaleTabs() {
+  $('sale-tabs').innerHTML = saleTabs.map((s, i) => {
+    const c = i === activeSale ? cart : s.cart, n = c.reduce((a, x) => a + x.qty, 0);
+    return `<button class="stab ${i === activeSale ? 'active' : ''}" data-st="${i}">Sale ${i + 1}${n ? ` <span>${n}</span>` : ''}${saleTabs.length > 1 ? `<i data-x="${i}">×</i>` : ''}</button>`;
+  }).join('') + '<button class="stab add" data-st="new">+</button>';
+}
+$('sale-tabs').addEventListener('click', e => {
+  const x = e.target.dataset.x, b = e.target.closest('[data-st]'); if (!b && x === undefined) return;
+  captureSale();
+  if (x !== undefined) {
+    if (saleTabs[x].cart.length && !confirm('Yo sale ma item chha. Band garne?')) return;
+    saleTabs.splice(+x, 1); loadSale(Math.min(activeSale > +x ? activeSale - 1 : activeSale, saleTabs.length - 1)); return;
+  }
+  if (b.dataset.st === 'new') { saleTabs.push(blankSale()); loadSale(saleTabs.length - 1); } else loadSale(+b.dataset.st);
+});
+
+/* ---- product grid ---- */
+function renderCats() {
+  const cats = [['all', 'All'], ['fast', '🔥 Fast moving'], ['rx', 'Rx'], ['near', '⏳ Near expiry'], ...[...new Set(medicines.map(m => m.category).filter(Boolean))].sort().map(c => ['c:' + c, c])];
+  $('pos-cats').innerHTML = cats.map(([k, l]) => `<button class="cat-pill ${posCat === k ? 'active' : ''}" data-cat="${esc(k)}">${esc(l)}</button>`).join('');
+}
+function posProducts() {
+  const q = billingSearch.value.trim().toLowerCase(), st = salesStats();
+  let list = groupProducts().filter(g => g.active);
+  if (q) list = list.filter(g => g.batches.some(m => [m.name, m.sku, m.barcode, m.generic, m.tags, m.brand].some(x => String(x || '').toLowerCase().includes(q))));
+  if (posCat === 'rx') list = list.filter(g => g.p.drugClass === 'A');
+  else if (posCat === 'near') list = list.filter(g => sellableOf(g).some(b => daysUntil(b.expiry) <= settings.expiryDays));
+  else if (posCat === 'fast') list = list.filter(g => st.get(g.key)?.s30).sort((a, b) => st.get(b.key).s30 - st.get(a.key).s30);
+  else if (posCat.startsWith('c:')) list = list.filter(g => g.p.category === posCat.slice(2));
+  if (posCat !== 'fast') list.sort((a, b) => (sellableOf(b).length > 0) - (sellableOf(a).length > 0) || a.name.localeCompare(b.name));
+  return list;
+}
+function renderGrid() {
+  renderCats();
+  const list = posProducts(), shown = list.slice(0, posLimit);
+  $('pos-grid').innerHTML = shown.map(g => {
+    const live = sellableOf(g), ref = live[0], sq = live.reduce((a, b) => a + b.qty, 0);
+    const inCart = cart.filter(c => sameName(c.name, g.name)).reduce((a, c) => a + c.qty, 0);
+    const near = ref && daysUntil(ref.expiry) <= settings.expiryDays;
+    return `<button class="tile ${ref ? '' : 'out'}" ${ref ? `data-med="${ref.id}"` : 'disabled'}>
+      ${inCart ? `<em class="in-cart">${inCart}</em>` : ''}${avatarHtml(g.name, g.p.image, 'lg')}
+      <div class="t-name">${esc(g.name)}</div>
+      <div class="t-price">${ref ? rs(ref.sellPrice) : 'Stock chaina'}</div>
+      <div class="t-meta"><span class="${sq <= g.reorder ? 'low' : ''}">${sq} stock</span>${g.p.drugClass === 'A' ? '<span class="chip rx">Rx</span>' : ''}${g.p.controlled ? '<span class="chip ctl">Ctl</span>' : ''}${near ? '<span class="chip ctl">Exp ⚠</span>' : ''}</div></button>`;
+  }).join('') || '<div class="alert-empty" style="grid-column:1/-1">Kunai product fela parena</div>';
+  $('pos-more').style.display = list.length > posLimit ? '' : 'none';
+  $('pos-more').textContent = `Aru dekhau (${list.length - posLimit} baaki)`;
+}
+const renderQuick = () => { renderGrid(); $('cust-list').innerHTML = customerBook().map(c => `<option value="${esc(c.name || c.phone)}">${esc(c.phone)}</option>`).join(''); };
+$('pos-grid').addEventListener('click', e => { const t = e.target.closest('[data-med]'); if (t) addToCart(t.dataset.med); });
+$('pos-cats').addEventListener('click', e => { const b = e.target.closest('[data-cat]'); if (b) { posCat = b.dataset.cat; posLimit = 60; renderGrid(); } });
+$('pos-more').addEventListener('click', () => { posLimit += 60; renderGrid(); });
+billingSearch.addEventListener('input', () => { posLimit = 60; renderGrid(); });
+
+/* ---- cart ---- */
+const IX = [
+  [['warfarin'], ['aspirin', 'ibuprofen', 'diclofenac', 'naproxen', 'ketorolac'], 'Bleeding ko jokhim badhchha'],
+  [['sildenafil', 'tadalafil'], ['isosorbide', 'nitroglycerin', 'glyceryl trinitrate'], 'Gambhir BP kam hune jokhim (nabechnu)'],
+  [['clarithromycin', 'erythromycin'], ['simvastatin', 'atorvastatin'], 'Muscle damage ko jokhim'],
+  [['methotrexate'], ['ibuprofen', 'diclofenac', 'naproxen', 'trimethoprim', 'cotrimoxazole'], 'Methotrexate toxicity badhchha'],
+  [['enalapril', 'lisinopril', 'ramipril', 'losartan', 'telmisartan'], ['spironolactone', 'potassium'], 'Potassium dherai badhne jokhim'],
+  [['tramadol'], ['fluoxetine', 'sertraline', 'amitriptyline'], 'Serotonin syndrome / seizure ko jokhim'],
+  [['ciprofloxacin', 'levofloxacin'], ['antacid', 'aluminium', 'magnesium', 'calcium', 'iron', 'zinc'], 'Absorption ghatchha, 2 ghanta antar rakhnu hos'],
+  [['digoxin'], ['amiodarone', 'clarithromycin', 'verapamil'], 'Digoxin toxicity badhchha']
+];
+function interactions() {
+  const txt = cart.map(c => `${c.name} ${medOf(c)?.generic || ''}`.toLowerCase()), out = [];
+  IX.forEach(([a, b, note]) => {
+    const ia = txt.findIndex(t => a.some(k => t.includes(k))), ib = txt.findIndex(t => b.some(k => t.includes(k)));
+    if (ia > -1 && ib > -1 && ia !== ib) out.push(`${cart[ia].name} + ${cart[ib].name}: ${note}`);
+  });
+  return out;
 }
 
 function renderCart() {
-  cart = cart.filter(c => medById(c.medId));
-  cart.forEach(c => { const m = medById(c.medId); c.maxQty = m.qty; if (c.qty > m.qty) c.qty = Math.max(1, m.qty); c.vatable = isVatable(m); c.mrp = mrpOf(m); });
-  $('cart-list').innerHTML = cart.length ? cart.map(lineHtml).join('')
-    : `<div class="cart-empty"><div class="ce-ico">🛒</div><b>Cart khali xa</b><span>Product khojnu hos, barcode scan garnu hos, ya tile ma tap garnu hos</span></div>`;
-  const qtyN = cart.reduce((a, c) => a + c.qty, 0);
-  $('cart-count').textContent = cart.length ? `${cart.length} item · ${qtyN} qty` : 'Empty';
-  const needRx = cart.some(c => isRx(medById(c.medId)));
-  $('rx-block').style.display = needRx ? '' : 'none';
-  if (!needRx) { $('rx-verified').checked = false; }
-  updateBillSummary();
+  $('cart-lines').innerHTML = cart.length ? cart.map((c, i) => {
+    const d = daysUntil(c.expiry), near = d <= settings.expiryDays;
+    return `<div class="cl" data-i="${i}">
+      <div class="cl-main"><b>${esc(c.name)}</b><div class="sub">${esc(c.batch)} · Exp ${esc(c.expiry || '')}${near ? ' <span style="color:var(--red)">⚠</span>' : ''} · ${c.rate}${c.disc ? ` · -${c.disc}%` : ''}</div></div>
+      <div class="cl-qty"><button data-q="-1">−</button><span>${c.qty}</span><button data-q="1">+</button></div>
+      <div class="cl-amt">${rs(c.qty * netRate(c))}</div></div>`;
+  }).join('') : '<div class="cart-empty">Cart khali xa<br><small>Tile thichnu hos ya barcode scan garnu hos</small></div>';
+  const ix = interactions(), w = $('ix-warn');
+  w.style.display = ix.length ? 'block' : 'none';
+  w.innerHTML = ix.length ? `<b>⚠ Drug interaction</b>${ix.map(x => '<div>' + esc(x) + '</div>').join('')}<small>Chhoto list matra ho. Pharmacist le reference herera nischit garnu hos.</small>` : '';
+  const name = val('billing-customer-name');
+  $('cust-label').textContent = name || val('billing-customer-phone') || 'Walk-in customer';
+  updateBillSummary(); renderSaleTabs(); renderGrid();
 }
+$('cart-lines').addEventListener('click', e => {
+  const row = e.target.closest('.cl'); if (!row) return;
+  const i = +row.dataset.i, q = e.target.dataset.q;
+  if (q) bumpQty(i, +q); else openLine(i);
+});
+window.bumpQty = function (i, d) {
+  const q = cart[i].qty + d;
+  if (q < 1) { cart.splice(i, 1); return renderCart(); }
+  if (q > cart[i].maxQty) return showToast('Stock ma yeti matra xa');
+  cart[i].qty = q; renderCart();
+};
+window.removeFromCart = i => { cart.splice(i, 1); renderCart(); };
+
+function openLine(i) {
+  const c = cart[i], batches = medicines.filter(x => sameName(x.name, c.name) && x.qty > 0 && daysUntil(x.expiry) >= 0).sort((a, b) => a.expiry.localeCompare(b.expiry));
+  showGeneric(c.name, `<label>Batch</label><select id="le-batch">${batches.map(b => `<option value="${b.id}" ${b.id === c.medId ? 'selected' : ''}>${esc(b.batch)} · exp ${esc(b.expiry)} · stock ${b.qty} · Rs.${b.sellPrice}</option>`).join('')}</select>
+    <label>Qty</label><input type="number" id="le-qty" min="1" value="${c.qty}">
+    <label>Line discount %</label><input type="number" id="le-disc" min="0" max="100" value="${c.disc || 0}">
+    <div class="chip-row">${[0, 5, 10, 15].map(v => `<button type="button" class="chip-btn" onclick="document.getElementById('le-disc').value=${v}">${v}%</button>`).join('')}</div>`,
+    [{ label: 'Remove', onClick: () => { cart.splice(i, 1); renderCart(); } },
+     { label: 'Alternatives', onClick: () => { setTimeout(() => showAlt(i), 60); } },
+     { label: 'Apply', primary: true, onClick: () => {
+        const nb = medicines.find(x => x.id === $('le-batch').value) || medOf(c);
+        const q = Math.max(1, Math.min(parseInt($('le-qty').value) || 1, nb.qty));
+        cart[i] = { ...c, medId: nb.id, batch: nb.batch, expiry: nb.expiry, rate: nb.sellPrice, maxQty: nb.qty, vatable: isVatable(nb), qty: q, disc: Math.min(Math.max(parseFloat($('le-disc').value) || 0, 0), 100) };
+        renderCart(); } }]);
+}
+window.showAlt = function (i) {
+  const c = cart[i], m = medOf(c); if (!m) return;
+  const gen = (m.generic || '').trim().toLowerCase();
+  if (!gen) return showToast('Yo medicine ko generic naam thapieko chaina');
+  const list = sellableBatches('').filter(x => x.id !== m.id && !sameName(x.name, m.name) && (x.generic || '').trim().toLowerCase() === gen).slice(0, 12);
+  showGeneric('Alternatives - ' + (m.generic || ''), list.length
+    ? `<div class="hint">Same generic, stock ma bhayeko. Hara = sasto.</div><div class="table-wrap"><table style="min-width:420px"><thead><tr><th>Product</th><th>Batch</th><th>Stock</th><th>Price</th><th></th></tr></thead><tbody>${list.map(x => `<tr><td>${esc(x.name)}</td><td>${esc(x.batch)}<div class="sub">Exp ${esc(x.expiry)}</div></td><td>${x.qty}</td><td style="color:${x.sellPrice < c.rate ? 'var(--accent)' : 'inherit'};font-weight:${x.sellPrice < c.rate ? 600 : 400}">${x.sellPrice}</td><td><button class="link-btn" onclick="swapAlt(${i},'${x.id}')">Use</button></td></tr>`).join('')}</tbody></table></div>`
+    : '<div class="alert-empty">Same generic ko arko product stock ma chaina</div>');
+};
+window.swapAlt = function (i, id) {
+  const m = medicines.find(x => x.id === id); if (!m) return;
+  cart[i] = { medId: m.id, name: m.name, batch: m.batch, expiry: m.expiry, qty: Math.min(cart[i].qty, m.qty), rate: m.sellPrice, maxQty: m.qty, vatable: isVatable(m), disc: 0 };
+  closeModal('modal-generic'); renderCart(); showToast('Alternative lagaiyo');
+};
 
 // Nepal: MRP already includes VAT, so VAT is extracted (13/113) from VAT-applicable items only.
 function calcBill() {
-  const gross = cart.reduce((s, c) => s + c.qty * c.rate, 0);
-  const subtotal = cart.reduce((s, c) => s + lineAmt(c), 0), lineDisc = gross - subtotal;
-  const dv = Math.max(parseFloat($('bill-discount').value) || 0, 0);
-  const billDisc = Math.min($('bill-disc-type').value === '%' ? subtotal * Math.min(dv, 100) / 100 : dv, subtotal);
-  let redeemPts = 0, redeemAmt = 0;
-  if (usePoints && currentCustomer && currentCustomer.points > 0) {
-    const rv = settings.loyaltyValue || 1;
-    redeemPts = Math.min(currentCustomer.points, Math.floor((subtotal - billDisc) / rv)); redeemAmt = redeemPts * rv;
-  }
-  const discount = billDisc + redeemAmt, net = subtotal - discount;
-  const vatGross = cart.filter(c => c.vatable).reduce((s, c) => s + lineAmt(c), 0);
-  const vat = subtotal ? vatGross * (net / subtotal) * 13 / 113 : 0;
-  const total = settings.roundOff ? Math.round(net) : net;
-  const mrpTotal = cart.reduce((s, c) => s + c.qty * (c.mrp || c.rate), 0);
-  return { gross, lineDisc, subtotal, billDisc, redeemPts, redeemAmt, discount, net, vat, roundAdj: total - net, total, saved: Math.max(0, mrpTotal - total) };
+  const subtotal = cart.reduce((s, c) => s + c.qty * netRate(c), 0);
+  const raw = numOf('bill-discount'), pct = $('bill-disc-type').value === '%';
+  let discount = Math.min(Math.max(pct ? subtotal * raw / 100 : raw, 0), subtotal);
+  if ($('bill-round').checked) discount += (subtotal - discount) - Math.floor(subtotal - discount);
+  const vatGross = cart.filter(c => c.vatable).reduce((s, c) => s + c.qty * netRate(c), 0);
+  const vat = (subtotal ? vatGross - discount * vatGross / subtotal : 0) * 13 / 113;
+  const listTotal = cart.reduce((s, c) => s + c.qty * c.rate, 0);
+  return { subtotal, discount, vat, total: subtotal - discount, saved: listTotal - subtotal + discount };
 }
-
 function updateBillSummary() {
   const b = calcBill();
-  $('bill-gross').textContent = rs(b.gross);
-  $('row-linedisc').style.display = b.lineDisc > 0.004 ? '' : 'none'; $('bill-linedisc').textContent = '− ' + rs(b.lineDisc);
-  $('row-points').style.display = b.redeemAmt > 0 ? '' : 'none'; $('bill-points').textContent = `− ${rs(b.redeemAmt)} (${b.redeemPts} pts)`;
-  $('bill-vat').textContent = rs(b.vat);
-  $('row-round').style.display = settings.roundOff && Math.abs(b.roundAdj) > 0.004 ? '' : 'none'; $('bill-round').textContent = (b.roundAdj >= 0 ? '+ ' : '− ') + rs(Math.abs(b.roundAdj));
-  $('bill-roundoff').checked = !!settings.roundOff;
-  $('bill-total').textContent = rs(b.total);
-  $('bill-saved').style.display = b.saved > 0.004 && cart.length ? '' : 'none'; $('bill-saved').textContent = `🎉 Customer le MRP bhanda ${rs(b.saved)} bachayo`;
-  $('btn-complete-sale').innerHTML = `<span>Pay</span><b>${rs(b.total)}</b><kbd>F9</kbd>`;
-  $('btn-complete-sale').disabled = !cart.length;
+  $('bill-subtotal').textContent = rs(b.subtotal); $('bill-vat').textContent = rs(b.vat); $('bill-total').textContent = rs(b.total);
+  $('bill-disc-view').textContent = b.discount > 0 ? '- ' + rs(b.discount) : 'Rs. 0';
+  $('bill-saving').textContent = b.saved > 0.005 ? 'Customer le bachat: ' + rs(b.saved) : '';
 }
-['bill-discount', 'bill-disc-type'].forEach(id => $(id).addEventListener('input', updateBillSummary));
-$('bill-roundoff').addEventListener('change', e => { settings.roundOff = e.target.checked; save(); updateBillSummary(); });
-document.querySelectorAll('[data-qdisc]').forEach(b => b.addEventListener('click', () => { $('bill-disc-type').value = '%'; $('bill-discount').value = b.dataset.qdisc; updateBillSummary(); }));
+$('btn-clear-cart').addEventListener('click', () => { cart = []; renderCart(); });
 
-function resetPos() {
-  cart = []; resumingSaleDraftId = null; usePoints = false;
-  ['billing-customer-name', 'billing-customer-phone', 'rx-doctor', 'rx-no'].forEach(id => $(id).value = '');
-  $('bill-discount').value = 0; $('bill-disc-type').value = 'Rs'; $('rx-verified').checked = false;
-  refreshCustomer(); renderCart();
-}
-$('btn-clear-cart').addEventListener('click', () => { if (cart.length && !confirm('Cart khali garne?')) return; resetPos(); billingSearch.focus(); });
+$('btn-discount').addEventListener('click', () => {
+  showGeneric('Bill discount', `<div class="input-row"><input type="number" id="dm-val" min="0" value="${$('bill-discount').value || 0}"><select id="dm-type" style="width:80px"><option ${$('bill-disc-type').value === 'Rs' ? 'selected' : ''}>Rs</option><option ${$('bill-disc-type').value === '%' ? 'selected' : ''}>%</option></select></div>
+    <div class="chip-row">${[5, 10, 15, 20].map(v => `<button type="button" class="chip-btn" onclick="document.getElementById('dm-val').value=${v};document.getElementById('dm-type').value='%'">${v}%</button>`).join('')}</div>
+    <label class="check-row" style="margin-top:12px"><input type="checkbox" id="dm-round" ${$('bill-round').checked ? 'checked' : ''}> Round off (paisa hatau)</label>`,
+    [{ label: 'Cancel' }, { label: 'Apply', primary: true, onClick: () => { $('bill-discount').value = $('dm-val').value || 0; $('bill-disc-type').value = $('dm-type').value; $('bill-round').checked = $('dm-round').checked; updateBillSummary(); } }]);
+});
 
-/* ---- today strip ---- */
-function renderPosStats() {
-  const today = new Date().toDateString(), live = sales.filter(s => s.status !== 'Cancelled' && new Date(s.date).toDateString() === today);
-  let cash = 0, dig = 0, cr = 0;
-  live.forEach(s => (s.payments || [{ mode: s.paymentMode, amt: s.total }]).forEach(p => { if (p.mode === 'Cash') cash += p.amt; else if (p.mode === 'Credit') cr += p.amt; else dig += p.amt; }));
-  const net = live.reduce((a, s) => a + saleNet(s), 0);
-  $('pos-stats').innerHTML = [['Today', rs(net), 'a'], ['Bills', live.length, ''], ['Cash', rs(cash), ''], ['Digital', rs(dig), ''], ['Udharo', rs(cr), 'w']]
-    .map(([l, v, c]) => `<div class="ps ${c}"><span>${l}</span><b>${v}</b></div>`).join('');
+/* ---- customer ---- */
+function customerBook() {
+  const m = new Map();
+  sales.forEach(s => {
+    if (!s.customerName && !s.customerPhone) return;
+    const k = (s.customerPhone || s.customerName).toLowerCase();
+    const e = m.get(k) || { name: '', phone: '', pan: '', visits: 0, spent: 0, due: 0 }; m.set(k, e);
+    e.name = s.customerName || e.name; e.phone = s.customerPhone || e.phone; e.pan = s.buyerPan || e.pan;
+    if (s.status === 'Cancelled') return;
+    e.visits++; e.spent += saleNet(s);
+    if (s.paymentMode === 'Credit' && !s.creditPaid) e.due += saleNet(s);
+  });
+  return [...m.values()];
 }
-function renderPos() { renderPosCats(); renderPosGrid(); renderPosStats(); fillCustomerList(); refreshCustomer(); renderCart(); updateDraftCounts(); }
-
-/* ---- checkout ---- */
-let payRows = [], payDue = 0;
-function validateSale() {
-  if (!cart.length) { showToast('Cart khali xa'); return false; }
-  const name = val('billing-customer-name');
-  const meds = cart.map(c => medById(c.medId));
-  if (meds.some(m => m && m.controlled) && !name) { showToast('Controlled medicine ko lagi customer ko naam chahiyo'); $('billing-customer-name').focus(); return false; }
-  if (meds.some(isRx) && !$('rx-verified').checked) { showToast('Prescription (Rx) check gari tick garnu hos'); $('rx-verified').focus(); return false; }
-  for (const c of cart) {
-    const m = medById(c.medId);
-    if (!m || m.qty < c.qty) { showToast(`${c.name} ko stock sufficient xaina`); return false; }
-    if (daysUntil(m.expiry) < 0) { showToast(`${c.name} expire bhaisakyo, bechna milena`); return false; }
-  }
-  return true;
-}
-function openPay() {
-  if (!validateSale()) return;
-  payDue = r2(calcBill().total);
-  payRows = [{ mode: 'Cash', amt: payDue, auto: true }];
-  $('pay-total').textContent = rs(payDue);
-  renderPay(); openModal('modal-pay');
-  setTimeout(() => { const el = $('pay-rows').querySelector('input'); if (el) { el.focus(); el.select(); } }, 60);
-}
-function evalPay() {
-  const paid = r2(payRows.reduce((a, r) => a + (+r.amt || 0), 0));
-  const cash = r2(payRows.filter(r => r.mode === 'Cash').reduce((a, r) => a + (+r.amt || 0), 0));
-  const credit = r2(payRows.filter(r => r.mode === 'Credit').reduce((a, r) => a + (+r.amt || 0), 0));
-  const remaining = Math.max(0, r2(payDue - paid)); let change = 0, ok = true, msg = '';
-  if (paid > payDue + 0.004) { const over = r2(paid - payDue); if (cash > 0 && over <= cash + 0.004) change = over; else { ok = false; msg = 'Card / digital / udharo amount bill bhanda badhi hunu hudaina'; } }
-  if (ok && remaining > 0.004) { ok = false; msg = `Baaki ${rs(remaining)}`; }
-  if (ok && credit > 0 && !val('billing-customer-name')) { ok = false; msg = 'Udharo ko lagi customer ko naam chahiyo (cart ma naam halnu hos)'; }
-  return { paid, cash, credit, remaining, change, ok, msg };
-}
-function renderPay() {
-  $('pay-rows').innerHTML = payRows.map((r, i) => `<div class="pay-row">
-    <select onchange="payMode(${i}, this.value)">${PAY_MODES.map(m => `<option value="${m}" ${m === r.mode ? 'selected' : ''}>${m === 'Credit' ? 'Credit / Udharo' : m}</option>`).join('')}</select>
-    <input type="number" min="0" step="0.01" inputmode="decimal" value="${r.amt}" oninput="payAmt(${i}, this.value)">
-    ${payRows.length > 1 ? `<button type="button" class="cl-x" onclick="payRemove(${i})">×</button>` : ''}</div>`).join('');
-  const used = new Set(payRows.map(r => r.mode));
-  $('pay-add').innerHTML = '<span class="sub">Split payment:</span>' + PAY_MODES.filter(m => !used.has(m)).map(m => `<button type="button" class="chip-btn" onclick="payAdd('${m}')">+ ${m === 'Credit' ? 'Udharo' : m}</button>`).join('');
-  const need = r2(payDue - payRows.filter(r => r.mode !== 'Cash').reduce((a, r) => a + (+r.amt || 0), 0));
-  const q = new Set([need]); [10, 50, 100, 500, 1000, 5000].forEach(st => { const v = Math.ceil(need / st) * st; if (v > need) q.add(v); });
-  $('pay-quick').innerHTML = payRows.some(r => r.mode === 'Cash') && need > 0
-    ? '<span class="sub">Cash tendered:</span>' + [...q].slice(0, 5).map((v, i) => `<button type="button" class="chip-btn" onclick="payCash(${v})">${i === 0 ? 'Exact ' : ''}${rs(v)}</button>`).join('') : '';
-  updatePayStatus();
-}
-function updatePayStatus() {
-  const e = evalPay(), el = $('pay-status');
-  el.className = 'pay-status ' + (e.ok ? 'ok' : 'bad');
-  el.innerHTML = e.ok ? `<div><span>Paid</span><b>${rs(e.paid)}</b></div>${e.change > 0 ? `<div class="chg"><span>Change (pharnu)</span><b>${rs(e.change)}</b></div>` : '<div><span>Status</span><b>✔ Ready</b></div>'}`
-    : `<div><span>Paid</span><b>${rs(e.paid)}</b></div><div><span>${e.remaining > 0.004 ? 'Remaining' : 'Check'}</span><b>${e.remaining > 0.004 ? rs(e.remaining) : '!'}</b></div>` + (e.msg && e.remaining <= 0.004 ? `<p>${esc(e.msg)}</p>` : '')
-      + (e.remaining > 0.004 && !payRows.some(r => r.mode === 'Credit') ? `<button type="button" class="btn sm" onclick="payRestCredit()">Baaki Udharo ma halne</button>` : '');
-  $('btn-pay-confirm').disabled = !e.ok;
-}
-window.payMode = (i, m) => { payRows[i].mode = m; renderPay(); };
-window.payAmt = (i, v) => {
-  payRows[i].amt = v === '' ? 0 : parseFloat(v) || 0;
-  if (payRows[i].mode === 'Cash') payRows[i].auto = false;
-  else { // keep the auto cash row equal to what is left after digital / credit rows
-    const ci = payRows.findIndex(r => r.mode === 'Cash' && r.auto);
-    if (ci >= 0) { payRows[ci].amt = Math.max(0, r2(payDue - payRows.filter(r => r.mode !== 'Cash').reduce((a, r) => a + (+r.amt || 0), 0))); $('pay-rows').querySelectorAll('input')[ci].value = payRows[ci].amt; }
-  }
-  updatePayStatus();
+window.cmLookup = function () {
+  const n = val('cm-name').toLowerCase(), c = customerBook().find(x => n && x.name.toLowerCase() === n);
+  if (c) { if (!$('cm-phone').value) $('cm-phone').value = c.phone; if (!$('cm-pan').value) $('cm-pan').value = c.pan; }
+  $('cm-info').innerHTML = c ? `${c.visits} patak aayeko · jamma ${rs(c.spent)}${c.due ? ` · <b style="color:var(--red)">Udharo baaki ${rs(c.due)}</b>` : ''}` : '';
 };
-window.payRemove = i => { payRows.splice(i, 1); renderPay(); };
-window.payAdd = m => { const rem = Math.max(0, evalPay().remaining); payRows.push({ mode: m, amt: rem }); renderPay(); };
-window.payCash = v => { const r = payRows.find(x => x.mode === 'Cash'); if (r) { r.amt = v; r.auto = false; renderPay(); } };
-window.payRestCredit = () => { const rem = evalPay().remaining; payRows.push({ mode: 'Credit', amt: rem }); renderPay(); };
-$('btn-complete-sale').addEventListener('click', openPay);
-$('btn-pay-cancel').addEventListener('click', () => closeModal('modal-pay'));
-$('btn-pay-confirm').addEventListener('click', () => { const e = evalPay(); if (!e.ok) return; closeModal('modal-pay'); finalizeSale(e); });
-$('modal-pay').addEventListener('keydown', e => { if (e.key === 'Enter' && !$('btn-pay-confirm').disabled && e.target.tagName !== 'BUTTON') { e.preventDefault(); $('btn-pay-confirm').click(); } });
+function setCustomer(n, p, pan, doc, rx) {
+  $('billing-customer-name').value = n; $('billing-customer-phone').value = p; $('billing-customer-pan').value = pan;
+  $('rx-doctor').value = doc; $('rx-no').value = rx; renderCart();
+}
+$('btn-customer').addEventListener('click', () => {
+  const hasRx = cart.some(c => medOf(c)?.drugClass === 'A');
+  showGeneric('Customer', `<label>Naam</label><input id="cm-name" list="cust-list" value="${esc(val('billing-customer-name'))}" oninput="cmLookup()">
+    <label>Phone</label><input id="cm-phone" value="${esc(val('billing-customer-phone'))}">
+    <label>Buyer PAN (VAT bill ko lagi, optional)</label><input id="cm-pan" value="${esc(val('billing-customer-pan'))}">
+    <div id="cm-info" class="cust-info"></div>
+    <div class="rx-block" style="${hasRx ? '' : 'display:none'}"><b>Prescription</b><input id="cm-doc" placeholder="Doctor ko naam" value="${esc(val('rx-doctor'))}"><input id="cm-rx" placeholder="Rx no. (optional)" value="${esc(val('rx-no'))}"></div>`,
+    [{ label: 'Clear', onClick: () => setCustomer('', '', '', '', '') },
+     { label: 'Save', primary: true, onClick: () => setCustomer(val('cm-name'), val('cm-phone'), val('cm-pan'), $('cm-doc') ? val('cm-doc') : '', $('cm-rx') ? val('cm-rx') : '') }]);
+  cmLookup();
+});
 
-function finalizeSale(ev) {
-  if (!validateSale()) return;
-  const b = calcBill(), name = val('billing-customer-name'), phone = val('billing-customer-phone');
-  // aggregate payments by mode; cash is recorded net of change
-  const agg = {}; payRows.forEach(r => { agg[r.mode] = (agg[r.mode] || 0) + (+r.amt || 0); });
-  if (agg.Cash) agg.Cash = r2(agg.Cash - ev.change);
-  const payments = Object.entries(agg).map(([mode, amt]) => ({ mode, amt: r2(amt) })).filter(p => p.amt > 0);
-  if (!payments.length) payments.push({ mode: 'Cash', amt: 0 });
-  const paymentMode = payments.length > 1 ? 'Split' : payments[0].mode;
-  const creditAmt = r2(payments.filter(p => p.mode === 'Credit').reduce((a, p) => a + p.amt, 0));
+/* ---- payment sheet (numpad) ---- */
+let pay = null;
+const padKeys = ['7', '8', '9', '4', '5', '6', '1', '2', '3', '0', '00', '⌫'];
+function openPay() {
+  if (!cart.length) return showToast('Cart khali xa');
+  if (!shift) { showToast('Pahile shift khola'); return openShiftModal(); }
+  pay = { mode: 'Cash', cash: '', ref: '', s: { cash: '', card: '', qr: '' }, t: 'cash' };
+  renderPay(); openModal('modal-pay');
+}
+function payFieldGet() { return pay.t === 'cash' ? pay.cash : pay.s[pay.t.slice(2)]; }
+function payFieldSet(v) { if (pay.t === 'cash') pay.cash = v; else pay.s[pay.t.slice(2)] = v; }
+function renderPay() {
+  const b = calcBill(), modes = [['Cash', 'Cash'], ['Card', 'Card'], ['QR', 'QR / Wallet'], ['Credit', 'Udharo'], ['Split', 'Split']];
+  pay.t = pay.mode === 'Split' ? 's.cash' : 'cash';
+  const needPad = pay.mode === 'Cash' || pay.mode === 'Split';
+  let fields = '';
+  if (pay.mode === 'Cash') fields = `<label>Cash received</label><div class="pm-in sel" data-t="cash" id="pm-cash"></div>
+    <div class="chip-row"><button class="chip-btn" data-add="exact">Exact</button>${[100, 500, 1000, 2000].map(v => `<button class="chip-btn" data-add="${v}">+${v}</button>`).join('')}<button class="chip-btn" data-add="clear">Clear</button></div><div id="pm-msg" class="change-line big"></div>`;
+  else if (pay.mode === 'Split') fields = [['cash', 'Cash'], ['card', 'Card'], ['qr', 'QR / Wallet']].map(([k, l]) => `<label>${l}</label><div class="split-line"><div class="pm-in ${k === 'cash' ? 'sel' : ''}" data-t="s.${k}" id="pm-s-${k}"></div><button class="chip-btn" data-rest="${k}">Baaki</button></div>`).join('') + '<div id="pm-msg" class="change-line big"></div>';
+  else if (pay.mode === 'Credit') fields = `<div class="hint" style="margin-top:12px">Yo bill udharo (credit) ma record huncha. Customer ko naam chahinchha.</div><div class="cust-info">Customer: <b>${esc(val('billing-customer-name') || 'select gareko chaina')}</b></div>`;
+  else fields = `<label>Reference / approval no. (optional)</label><input id="pm-ref" placeholder="Transaction ID" value="${esc(pay.ref)}"><div class="hint" style="margin-top:10px">${pay.mode === 'QR' ? 'Fonepay / eSewa / Khalti ma paisa aayeko confirm garepachhi' : 'Card terminal ma approve bhaepachhi'} "Complete sale" thichnu hos.</div>`;
+  $('pay-body').innerHTML = `<div class="pay-head"><div><div class="sub">Tirnu parne</div><div class="pay-due">${rs(b.total)}</div></div><button class="btn" id="pm-cancel">✕</button></div>
+    <div class="pay-grid5">${modes.map(([k, l]) => `<button class="pay-btn ${pay.mode === k ? 'active' : ''}" data-pm="${k}">${l}</button>`).join('')}</div>
+    <div class="pay-cols ${needPad ? '' : 'nopad'}"><div>${fields}</div>
+      ${needPad ? `<div class="numpad">${padKeys.map(k => `<button data-k="${k}">${k}</button>`).join('')}</div>` : ''}</div>
+    <div class="pay-foot"><label class="check-row"><input type="checkbox" id="pm-print" checked> Receipt print</label><button class="btn primary big" id="pm-done">Complete sale ✓</button></div>`;
+  payRefresh();
+}
+function payRefresh() {
+  const b = calcBill(), t = b.total;
+  document.querySelectorAll('.pm-in').forEach(el => { const k = el.dataset.t; el.textContent = k === 'cash' ? (pay.cash || '') : pay.s[k.slice(2)] || ''; el.classList.toggle('sel', k === pay.t); });
+  const msg = $('pm-msg'); if (!msg) return;
+  if (pay.mode === 'Cash') {
+    const r = parseFloat(pay.cash);
+    msg.textContent = isNaN(r) ? 'Blank = exact cash' : r >= t ? 'Change dinu: ' + rs(r - t) : 'Kam xa: ' + rs(t - r);
+    msg.style.color = !isNaN(r) && r < t ? 'var(--red)' : 'var(--accent)';
+  } else {
+    const left = t - ['cash', 'card', 'qr'].reduce((a, k) => a + (parseFloat(pay.s[k]) || 0), 0);
+    msg.textContent = Math.abs(left) < 0.01 ? 'Milyo ✓' : (left > 0 ? 'Baaki: ' : 'Badhi: ') + rs(Math.abs(left));
+    msg.style.color = Math.abs(left) < 0.01 ? 'var(--accent)' : 'var(--red)';
+  }
+}
+function padPress(k) {
+  let v = payFieldGet() || '';
+  v = k === '⌫' ? v.slice(0, -1) : (v.length < 9 ? v + k : v);
+  payFieldSet(v); payRefresh();
+}
+$('modal-pay').addEventListener('click', e => {
+  const t = e.target;
+  if (t.id === 'pm-cancel' || t === $('modal-pay')) return closeModal('modal-pay');
+  if (t.dataset.pm) { pay.mode = t.dataset.pm; $('bill-payment-mode').value = pay.mode; if (pay.mode === 'Split') pay.s.cash = String(calcBill().total); return renderPay(); }
+  if (t.dataset.k) return padPress(t.dataset.k);
+  if (t.dataset.add) {
+    const a = t.dataset.add; pay.cash = a === 'exact' ? String(calcBill().total) : a === 'clear' ? '' : String((parseFloat(pay.cash) || 0) + +a); return payRefresh();
+  }
+  if (t.dataset.rest) {
+    const o = ['cash', 'card', 'qr'].filter(k => k !== t.dataset.rest).reduce((a, k) => a + (parseFloat(pay.s[k]) || 0), 0);
+    pay.s[t.dataset.rest] = String(Math.max(calcBill().total - o, 0)); return payRefresh();
+  }
+  const f = t.closest('.pm-in'); if (f) { pay.t = f.dataset.t; return payRefresh(); }
+  if (t.id === 'pm-done') completeSale();
+});
+$('modal-pay').addEventListener('input', e => { if (e.target.id === 'pm-ref') pay.ref = e.target.value; });
+
+function completeSale() {
+  const mode = pay.mode, customerName = val('billing-customer-name');
+  if (mode === 'Credit' && !customerName) return showToast('Udharo ko lagi customer ko naam chahiyo');
+  if (cart.some(c => medOf(c)?.controlled) && !customerName) return showToast('Controlled medicine ko lagi customer ko naam chahiyo');
+  for (const c of cart) {
+    const m = medOf(c);
+    if (!m || m.qty < c.qty) return showToast(`${c.name} ko stock sufficient xaina`);
+    if (daysUntil(m.expiry) < 0) return showToast(`${c.name} expire bhaisakyo, bechna milena`);
+  }
+  const b = calcBill();
+  let payments, tendered = 0, change = 0;
+  if (mode === 'Cash') {
+    tendered = parseFloat(pay.cash) || b.total;
+    if (tendered < b.total) return showToast('Cash kam xa: ' + rs(b.total - tendered) + ' baaki');
+    change = tendered - b.total; payments = [{ mode: 'Cash', amount: b.total }];
+  } else if (mode === 'Split') {
+    payments = [['Cash', 'cash'], ['Card', 'card'], ['QR', 'qr']].map(([m, k]) => ({ mode: m, amount: parseFloat(pay.s[k]) || 0 })).filter(p => p.amount > 0);
+    if (Math.abs(payments.reduce((a, p) => a + p.amount, 0) - b.total) > 0.01) return showToast('Split ko jod Total sanga milena');
+  } else payments = [{ mode, amount: b.total, ref: pay.ref }];
+  if (cart.some(c => medOf(c)?.drugClass === 'A') && !val('rx-doctor') && !confirm('Rx medicine ma doctor ko naam halenau. Tara pani sale garne?')) return;
 
   let cost = 0;
-  const items = cart.map(c => {
-    const m = medById(c.medId); m.qty -= c.qty; cost += m.purchasePrice * c.qty;
-    return { medId: c.medId, name: c.name, batch: c.batch, expiry: c.expiry, qty: c.qty, rate: lineEff(c), listRate: c.rate, discPct: c.discPct || 0, mrp: c.mrp, vatable: c.vatable, cost: m.purchasePrice };
-  });
-  const cust = upsertCustomer(name, phone);
-  const per = settings.loyaltyPer || 0, earned = cust && per > 0 ? Math.floor(b.total / per) : 0;
-  if (cust) cust.points = Math.max(0, (cust.points || 0) - b.redeemPts + earned);
-  const total = r2(b.total), vat = r2(b.vat);
+  const items = cart.map(c => { const m = medOf(c); m.qty -= c.qty; cost += m.purchasePrice * c.qty; return { ...c, listRate: c.rate, rate: netRate(c), cost: m.purchasePrice }; });
   const invoice = {
     id: uid(), invoiceNo: 'INV-' + nextInvoiceNo(), date: new Date().toISOString(),
-    customerName: name, customerPhone: phone, customerId: cust ? cust.id : undefined,
-    items, subtotal: r2(b.subtotal), discount: r2(b.discount), vat, total, roundOn: !!settings.roundOff, roundOff: r2(b.roundAdj),
-    profit: r2(total - vat - cost), paymentMode, payments, creditAmt,
-    tendered: ev.cash > 0 ? ev.cash : undefined, change: ev.change || 0,
-    pointsEarned: earned, pointsUsed: b.redeemPts, pointsBalance: cust ? cust.points : undefined,
-    rx: $('rx-block').style.display !== 'none' ? { doctor: val('rx-doctor'), no: val('rx-no'), verified: true } : undefined
+    customerName, customerPhone: val('billing-customer-phone'), buyerPan: val('billing-customer-pan'), doctor: val('rx-doctor'), rxNo: val('rx-no'),
+    items, subtotal: b.subtotal, discount: b.discount, vat: b.vat, total: b.total,
+    profit: b.total - b.vat - cost, paymentMode: mode, payments, tendered, change
   };
   sales.push(invoice);
   if (resumingSaleDraftId) { salesDrafts = salesDrafts.filter(d => d.id !== resumingSaleDraftId); resumingSaleDraftId = null; }
-  logAct('Sale: ' + invoice.invoiceNo + ' ' + rs(invoice.total) + ' (' + paymentMode + ')');
-  save(); updateDraftCounts(); fillCustomerList();
-  renderMedicineTable($('medicine-search').value);
-  lastInvoice = invoice; showInvoice(invoice);
-  resetPos(); renderPosGrid(); renderPosStats();
+  logAct('Sale: ' + invoice.invoiceNo + ' ' + rs(invoice.total));
+  save(); updateDraftCounts();
+  const autoPrint = $('pm-print').checked;
+  closeModal('modal-pay');
+  // reset this sale tab (close it if other tabs are open)
+  saleTabs[activeSale] = blankSale();
+  if (saleTabs.length > 1) { saleTabs.splice(activeSale, 1); activeSale = Math.min(activeSale, saleTabs.length - 1); }
+  loadSale(activeSale);
+  renderMedicineTable(); showInvoice(invoice);
+  if (change > 0) showToast('Change dinu: ' + rs(change));
+  if (autoPrint) setTimeout(() => window.print(), 400);
 }
 
-/* ---- receipt ---- */
-function numToWords(n) {
-  n = Math.round((n + Number.EPSILON) * 100) / 100;
-  const ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
-  const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
-  const two = x => x < 20 ? ones[x] : tens[Math.floor(x / 10)] + (x % 10 ? ' ' + ones[x % 10] : '');
-  const three = x => (x >= 100 ? ones[Math.floor(x / 100)] + ' Hundred' + (x % 100 ? ' ' : '') : '') + (x % 100 ? two(x % 100) : '');
-  let r = Math.floor(n); const p = Math.round((n - r) * 100), parts = [];
-  const cr = Math.floor(r / 1e7); r %= 1e7; const lk = Math.floor(r / 1e5); r %= 1e5; const th = Math.floor(r / 1e3); r %= 1e3;
-  if (cr) parts.push(three(cr) + ' Crore'); if (lk) parts.push(two(lk) + ' Lakh'); if (th) parts.push(two(th) + ' Thousand'); if (r) parts.push(three(r));
-  return (parts.join(' ') || 'Zero') + ' Rupees' + (p ? ' and ' + two(p) + ' Paisa' : '') + ' Only';
+/* ---- shift / day close / CBMS ---- */
+const fiscalYear = d => { const y = d.getFullYear(), after = d.getMonth() > 6 || (d.getMonth() === 6 && d.getDate() >= 17), s = after ? y + 57 : y + 56; return s + '.' + String(s + 1).slice(-3); };
+function updateShiftBtn() {
+  $('btn-shift').textContent = shift ? 'Shift: ' + new Date(shift.openedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' · Close' : 'Open shift';
+  $('btn-shift').classList.toggle('primary', !shift);
 }
+function openShiftModal() {
+  if (!shift) return showGeneric('Shift khola', `<label>Drawer ma suru ko cash (opening float)</label><input type="number" id="sh-open" min="0" value="0">`,
+    [{ label: 'Cancel' }, { label: 'Open shift', primary: true, onClick: () => { shift = { openedAt: new Date().toISOString(), opening: numOf('sh-open') }; save(); updateShiftBtn(); showToast('Shift khulyo'); } }]);
+  const since = new Date(shift.openedAt), by = { Cash: 0, Card: 0, QR: 0, Credit: 0 };
+  const list = sales.filter(s => new Date(s.date) >= since && s.status !== 'Cancelled');
+  list.forEach(s => (s.payments || [{ mode: s.paymentMode, amount: s.total }]).forEach(p => { by[p.mode] = (by[p.mode] || 0) + p.amount * (s.total ? saleNet(s) / s.total : 0); }));
+  const net = list.reduce((a, s) => a + saleNet(s), 0), expected = shift.opening + by.Cash;
+  window.dcCalc = () => { const d = numOf('dc-count') - expected; $('dc-var').textContent = $('dc-count').value === '' ? '' : (Math.abs(d) < 0.5 ? 'Milyo ✓' : (d > 0 ? 'Badhi ' : 'Kam ') + rs(Math.abs(d))); };
+  const cbms = () => exportTable('cbms_' + localISO(new Date()), 'CBMS', ['seller_pan', 'buyer_pan', 'buyer_name', 'fiscal_year', 'invoice_number', 'invoice_date', 'total_sales', 'taxable_sales_vat', 'vat', 'excisable_amount', 'excise', 'taxable_sales_hst', 'hst'],
+    list.map(s => [settings.pan || '', s.buyerPan || '', s.customerName || '', fiscalYear(new Date(s.date)), s.invoiceNo, localISO(new Date(s.date)), +saleNet(s).toFixed(2), +(s.vat / 0.13).toFixed(2), +s.vat.toFixed(2), 0, 0, 0, 0]));
+  showGeneric('Shift close', `
+    <div class="stat-grid small" style="grid-template-columns:repeat(2,1fr)"><div class="stat-card"><div class="stat-label">Invoices</div><div class="stat-value">${list.length}</div></div><div class="stat-card good"><div class="stat-label">Net sales</div><div class="stat-value">${rs(net)}</div></div></div>
+    <div class="table-wrap"><table style="min-width:0"><tbody>${Object.entries(by).map(([k, v]) => `<tr><td>${k}</td><td style="text-align:right">${rs(v)}</td></tr>`).join('')}<tr><td>Opening cash</td><td style="text-align:right">${rs(shift.opening)}</td></tr><tr><td><b>Expected drawer</b></td><td style="text-align:right"><b>${rs(expected)}</b></td></tr></tbody></table></div>
+    <label>Drawer ma gani herda kati cash?</label><input type="number" id="dc-count" oninput="dcCalc()"><div id="dc-var" class="change-line" style="margin-top:8px"></div>
+    <div class="hint" style="margin-top:6px">CBMS CSV: IRD ko API fields anusar. Real-time sync ko lagi IRD login chahinchha (yo static site bata hudaina).</div>`,
+    [{ label: 'Back' }, { label: 'CBMS CSV', onClick: () => { cbms(); return false; } },
+     { label: 'Print', onClick: () => { setTimeout(() => printTable('Shift report', ['Mode', 'Amount'], Object.entries(by).map(([k, v]) => [k, +v.toFixed(2)]), `Invoices ${list.length} | Net ${rs(net)} | Expected drawer ${rs(expected)}`), 150); } },
+     { label: 'Close shift', primary: true, onClick: () => {
+        const counted = $('dc-count').value === '' ? null : numOf('dc-count');
+        shifts.push({ openedAt: shift.openedAt, closedAt: new Date().toISOString(), opening: shift.opening, cash: by.Cash, net, invoices: list.length, counted, variance: counted === null ? null : counted - expected });
+        shift = null; logAct('Shift closed: ' + rs(net)); save(); updateShiftBtn(); showToast('Shift band bhayo'); } }]);
+}
+$('btn-shift').addEventListener('click', openShiftModal);
+$('btn-pay').addEventListener('click', openPay);
+
+/* ---- receipt share, reprint tracking, keyboard ---- */
+const payText = inv => inv.payments ? inv.payments.map(p => `${p.mode} ${rs(p.amount)}`).join(' + ') : inv.paymentMode;
+function receiptText(inv) {
+  return [settings.name, inv.invoiceNo + ' | ' + new Date(inv.date).toLocaleString(), '',
+    ...inv.items.map(i => `${i.name} x${i.qty} = ${(i.qty * i.rate).toFixed(2)}`), '',
+    'Total: ' + rs(inv.total), 'Payment: ' + payText(inv), '', 'Dhanyabad! Tapai ko swasthya ko lagi shubhakamana.'].join('\n');
+}
+$('btn-copy-receipt').addEventListener('click', () => {
+  if (!lastInvoice) return;
+  (navigator.clipboard ? navigator.clipboard.writeText(receiptText(lastInvoice)) : Promise.reject()).then(() => showToast('Receipt text copy bhayo')).catch(() => showToast('Copy garna sakiyena'));
+});
+$('btn-wa-receipt').addEventListener('click', () => {
+  if (!lastInvoice) return;
+  let p = (lastInvoice.customerPhone || '').replace(/\D/g, ''); if (p.length === 10) p = '977' + p;
+  window.open('https://wa.me/' + p + '?text=' + encodeURIComponent(receiptText(lastInvoice)), '_blank');
+});
+$('btn-print-invoice').addEventListener('click', () => { if (lastInvoice) { lastInvoice.printCount = (lastInvoice.printCount || 0) + 1; save(); } });
+
+document.addEventListener('keydown', e => {
+  if ($('modal-pay').classList.contains('open')) {
+    if (e.key === 'Escape') closeModal('modal-pay');
+    else if (e.key === 'Enter') { e.preventDefault(); completeSale(); }
+    else if (document.activeElement.tagName !== 'INPUT' && (/^[0-9]$/.test(e.key) || e.key === 'Backspace') && (pay.mode === 'Cash' || pay.mode === 'Split')) padPress(e.key === 'Backspace' ? '⌫' : e.key);
+    return;
+  }
+  if (!$('page-billing').classList.contains('active')) return;
+  if (e.key === 'F2') { e.preventDefault(); billingSearch.focus(); billingSearch.select(); }
+  else if (e.key === 'F4') { e.preventDefault(); openPay(); }
+  else if (e.key === 'F8') { e.preventDefault(); $('btn-save-draft').click(); }
+  else if (e.key === 'F9') { e.preventDefault(); captureSale(); saleTabs.push(blankSale()); loadSale(saleTabs.length - 1); }
+  else if (e.key === 'Escape' && document.activeElement === billingSearch) { billingSearch.value = ''; renderGrid(); }
+});
 
 function showInvoice(inv) {
-  currentInvoice = inv;
-  const pays = inv.payments || [{ mode: inv.paymentMode, amt: inv.total }];
-  const mrpSave = inv.items.reduce((a, i) => a + i.qty * ((i.mrp || i.rate) - i.rate), 0);
-  const rx = inv.rx && (inv.rx.doctor || inv.rx.no) ? `<div class="inv-meta">Rx: ${esc(inv.rx.doctor || '')} ${inv.rx.no ? '#' + esc(inv.rx.no) : ''}</div>` : '';
-  $('invoice-print-area').innerHTML = `
+  lastInvoice = inv;
+  document.getElementById('invoice-print-area').innerHTML = `
     <h3>${esc(settings.name)}</h3>
     <div class="inv-meta">${esc(settings.address || '')}${settings.contact ? ' | ' + esc(settings.contact) : ''}<br>${settings.pan ? 'PAN: ' + esc(settings.pan) : ''}${settings.dda ? ' | DDA: ' + esc(settings.dda) : ''}</div>
-    <div class="inv-meta"><b>${esc(inv.invoiceNo)}</b> | ${new Date(inv.date).toLocaleString()}</div>
-    ${inv.customerName || inv.customerPhone ? `<div class="inv-meta">Customer: ${esc(inv.customerName || '')} ${inv.customerPhone ? '(' + esc(inv.customerPhone) + ')' : ''}</div>` : ''}
-    ${rx}
+    <div class="inv-meta"><b>${inv.buyerPan ? 'TAX INVOICE' : 'ABBREVIATED TAX INVOICE'}</b>${inv.printCount ? ' | <b>COPY OF ORIGINAL (' + inv.printCount + ')</b>' : ''}</div>
+    <div class="inv-meta"><b>${esc(inv.invoiceNo)}</b> | ${new Date(inv.date).toLocaleString()} | FY ${fiscalYear(new Date(inv.date))}</div>
+    ${inv.buyerPan ? `<div class="inv-meta">Buyer PAN: ${esc(inv.buyerPan)}</div>` : ''}
+    ${inv.customerName ? `<div class="inv-meta">Customer: ${esc(inv.customerName)} ${inv.customerPhone ? '(' + esc(inv.customerPhone) + ')' : ''}</div>` : ''}
     <table>
-      <thead><tr><th>Item</th><th>Qty</th><th>Rate</th><th>Amt</th></tr></thead>
-      <tbody>${inv.items.map(i => `<tr><td>${esc(i.name)}<br><small>${esc(i.batch)} · exp ${esc(i.expiry || '')}${i.discPct ? ' · ' + i.discPct + '% off' : ''}</small></td><td>${i.qty}</td><td>${(+i.rate).toFixed(2)}</td><td>${(i.qty * i.rate).toFixed(2)}</td></tr>`).join('')}</tbody>
+      <thead><tr><th>Item</th><th>Batch/Exp</th><th>Qty</th><th>Rate</th><th>Amt</th></tr></thead>
+      <tbody>${inv.items.map(i => `<tr><td>${esc(i.name)}</td><td>${esc(i.batch)}<br><small>${esc(i.expiry || '')}</small></td><td>${i.qty}</td><td>${i.rate}</td><td>${(i.qty * i.rate).toFixed(2)}</td></tr>`).join('')}</tbody>
     </table>
     <div class="bill-row"><span>Subtotal</span><span>${rs(inv.subtotal)}</span></div>
-    ${inv.discount ? `<div class="bill-row"><span>Discount${inv.pointsUsed ? ' (incl. ' + inv.pointsUsed + ' pts)' : ''}</span><span>- ${rs(inv.discount)}</span></div>` : ''}
+    <div class="bill-row"><span>Discount</span><span>${rs(inv.discount)}</span></div>
     <div class="bill-row"><span>VAT 13% (included)</span><span>${rs(inv.vat)}</span></div>
-    ${inv.roundOff ? `<div class="bill-row"><span>Round off</span><span>${inv.roundOff > 0 ? '+' : '-'} ${rs(Math.abs(inv.roundOff))}</span></div>` : ''}
     <div class="inv-total-row"><span>Total</span><span>${rs(inv.total)}</span></div>
-    <div class="inv-words">${esc(numToWords(inv.total))}</div>
     ${inv.returned ? `<div class="bill-row"><span>Returned</span><span>- ${rs(inv.returned)}</span></div>` : ''}
-    <div class="inv-pay">${pays.map(p => `<div class="bill-row"><span>${p.mode === 'Credit' ? 'Credit / Udharo' : esc(p.mode)}</span><span>${rs(p.amt)}</span></div>`).join('')}
-      ${inv.tendered ? `<div class="bill-row"><span>Cash tendered</span><span>${rs(inv.tendered)}</span></div>` : ''}${inv.change ? `<div class="bill-row"><span>Change</span><span>${rs(inv.change)}</span></div>` : ''}</div>
-    ${inv.pointsEarned || inv.pointsUsed ? `<div class="inv-meta">⭐ Points: +${inv.pointsEarned || 0}${inv.pointsUsed ? ' / -' + inv.pointsUsed : ''} · Balance ${inv.pointsBalance ?? '-'}</div>` : ''}
-    ${mrpSave > 0.004 ? `<div class="inv-meta">You saved ${rs(mrpSave)} on MRP</div>` : ''}
-    ${inv.status === 'Cancelled' ? '<div class="inv-meta" style="color:var(--red);"><b>*** CANCELLED ***</b></div>' : ''}
-    <div class="inv-meta" style="margin-top:10px;">Dhanyabaad! Swasthya rahnu hos 🙏<br><small>Medicine pharmacist ko salah anusar matra prayog garnu hos</small></div>`;
-  openModal('modal-invoice');
+    ${inv.doctor ? `<div class="inv-meta">Dr. ${esc(inv.doctor)}${inv.rxNo ? ' | Rx ' + esc(inv.rxNo) : ''}</div>` : ''}
+    <div class="inv-meta" style="margin-top:10px;">Payment: ${esc(payText(inv))}${inv.tendered > inv.total ? ` | Cash ${rs(inv.tendered)} | Change ${rs(inv.change)}` : ''}</div>
+    ${inv.status === 'Cancelled' ? '<div class="inv-meta" style="color:var(--red);"><b>*** CANCELLED ***</b></div>' : ''}`;
+  document.getElementById('modal-invoice').classList.add('open');
 }
-document.getElementById('btn-close-invoice').addEventListener('click', () => closeModal('modal-invoice'));
+document.getElementById('btn-close-invoice').addEventListener('click', () => document.getElementById('modal-invoice').classList.remove('open'));
 document.getElementById('btn-print-invoice').addEventListener('click', () => window.print());
-$('btn-wa-invoice').addEventListener('click', () => {
-  const inv = currentInvoice; if (!inv) return;
-  let ph = digits(inv.customerPhone); if (ph.length === 10 && ph[0] === '9') ph = '977' + ph;
-  const txt = `*${settings.name}*\n${inv.invoiceNo} | ${new Date(inv.date).toLocaleDateString('en-GB')}\n\n` +
-    inv.items.map(i => `• ${i.name} × ${i.qty} = ${rs(i.qty * i.rate)}`).join('\n') +
-    `\n\n*Total: ${rs(inv.total)}* (${payLabel(inv)})\n\nDhanyabaad! 🙏`;
-  window.open(`https://wa.me/${ph}?text=${encodeURIComponent(txt)}`, '_blank');
-});
-$('btn-last-bill').addEventListener('click', () => { const s = lastInvoice || [...sales].sort((a, b) => new Date(b.date) - new Date(a.date))[0]; if (s) showInvoice(s); else showToast('Kunai bill chaina'); });
-
-/* ---- held bills ---- */
-$('btn-save-draft').addEventListener('click', () => {
-  if (!cart.length) { showToast('Cart khali xa'); return; }
-  const d = { id: resumingSaleDraftId || uid(), saved: new Date().toISOString(), customerName: val('billing-customer-name'), customerPhone: val('billing-customer-phone'),
-    discount: $('bill-discount').value, discType: $('bill-disc-type').value, rx: { doctor: val('rx-doctor'), no: val('rx-no') }, items: cart.map(c => ({ ...c })) };
-  const i = salesDrafts.findIndex(x => x.id === d.id);
-  if (i >= 0) salesDrafts[i] = d; else salesDrafts.push(d);
-  resetPos(); save(); updateDraftCounts(); showToast('Bill hold bhayo (F8 bata recall)'); billingSearch.focus();
-});
-$('btn-drafts').addEventListener('click', showSaleDrafts);
-function showSaleDrafts() {
-  const body = salesDrafts.length ? salesDrafts.map(d => `<div class="alert-item"><span><b>${esc(d.customerName || 'Walk-in')}</b><br><small class="sr-meta">${new Date(d.saved).toLocaleString()} · ${d.items.length} item · ${rs(d.items.reduce((a, c) => a + c.qty * c.rate * (1 - (c.discPct || 0) / 100), 0))}</small></span>
-    <span><button class="btn sm primary" onclick="resumeSaleDraft('${d.id}')">Resume</button> <button class="link-btn danger" onclick="deleteSaleDraft('${d.id}')">Delete</button></span></div>`).join('')
-    : '<div class="alert-empty">Kunai held bill chaina</div>';
-  showGeneric('Held Bills', `<div class="alert-list">${body}</div>`, [{ label: 'Close' }]);
-}
-window.resumeSaleDraft = function (id) {
-  const d = salesDrafts.find(x => x.id === id); if (!d) return;
-  if (cart.length && !confirm('Abhiko cart replace garne?')) return;
-  let dropped = 0; const items = [];
-  d.items.forEach(it => {
-    const m = medById(it.medId);
-    if (!m || m.qty <= 0 || daysUntil(m.expiry) < 0) { dropped++; return; }
-    items.push({ ...makeLine(m, Math.min(it.qty, m.qty)), discPct: it.discPct || 0 });
-  });
-  cart = items; resumingSaleDraftId = id;
-  $('billing-customer-name').value = d.customerName || ''; $('billing-customer-phone').value = d.customerPhone || '';
-  $('bill-discount').value = d.discount || 0; $('bill-disc-type').value = d.discType || 'Rs';
-  $('rx-doctor').value = d.rx?.doctor || ''; $('rx-no').value = d.rx?.no || '';
-  closeModal('modal-generic'); refreshCustomer(); renderCart();
-  showToast(dropped ? `${dropped} item stock/expiry ko karan hatayo` : 'Held bill cart ma load bhayo');
-};
-window.deleteSaleDraft = function (id) {
-  if (!confirm('Held bill delete garne?')) return;
-  salesDrafts = salesDrafts.filter(d => d.id !== id); if (resumingSaleDraftId === id) resumingSaleDraftId = null; save(); updateDraftCounts(); showSaleDrafts();
-};
-
-/* ---- keyboard shortcuts (F2 search · F4 hold · F8 held bills · F9 pay · Esc) ---- */
-document.addEventListener('keydown', e => {
-  if (!$('page-billing').classList.contains('active')) return;
-  const modalOpen = document.querySelector('.modal-overlay.open');
-  if (e.key === 'Escape' && modalOpen) { if (modalOpen.id === 'modal-pay' || modalOpen.id === 'modal-invoice' || modalOpen.id === 'modal-generic') closeModal(modalOpen.id); return; }
-  if (modalOpen) return;
-  const act = { F2: () => { billingSearch.focus(); billingSearch.select(); }, F4: () => $('btn-save-draft').click(), F8: () => showSaleDrafts(), F9: () => openPay() }[e.key];
-  if (act) { e.preventDefault(); act(); }
-});
 
 /* ============ SHARED UTILITIES ============ */
 const reportData = {};
@@ -1623,7 +1542,7 @@ function localISO(d) { return new Date(d.getTime() - d.getTimezoneOffset() * 600
 function fmtDate(iso) { return iso ? new Date(iso).toLocaleDateString('en-GB') : '-'; }
 function logAct(text) { activityLog.push({ date: new Date().toISOString(), text }); if (activityLog.length > 300) activityLog.shift(); }
 function updateDraftCounts() {
-  $('btn-drafts').innerHTML = `⏸ Held bills (${salesDrafts.length}) <kbd>F8</kbd>`;
+  $('btn-drafts').textContent = `Drafts (${salesDrafts.length})`;
   $('btn-pur-drafts').textContent = `Drafts (${purchaseDrafts.length})`;
 }
 
@@ -1699,7 +1618,7 @@ const nextInvoiceNo = () => Math.max(1000, ...sales.map(s => parseInt(String(s.i
 
 function filteredSales() {
   const from = $('sales-from').value, to = $('sales-to').value, mode = $('sales-mode').value, st = $('sales-status').value, q = $('sales-q').value.trim().toLowerCase();
-  return sales.filter(s => inRange(s.date, from, to) && (!mode || s.paymentMode === mode || (s.payments || []).some(p => p.mode === mode)) &&
+  return sales.filter(s => inRange(s.date, from, to) && (!mode || s.paymentMode === mode) &&
     (!st || (st === 'Cancelled') === (s.status === 'Cancelled')) &&
     (!q || s.invoiceNo.toLowerCase().includes(q) || (s.customerName || '').toLowerCase().includes(q) || (s.customerPhone || '').includes(q) || s.items.some(i => i.name.toLowerCase().includes(q))))
     .sort((a, b) => new Date(b.date) - new Date(a.date));
@@ -1708,13 +1627,13 @@ function filteredSales() {
 function renderSalesReport() {
   const list = filteredSales(), live = list.filter(s => s.status !== 'Cancelled');
   const net = live.reduce((a, s) => a + saleNet(s), 0), profit = live.reduce((a, s) => a + saleProfitNet(s), 0);
-  const due = live.reduce((a, s) => a + creditDue(s), 0);
+  const due = live.filter(s => s.paymentMode === 'Credit' && !s.creditPaid).reduce((a, s) => a + saleNet(s), 0);
   $('report-total-sales').textContent = rs(net);
   $('report-total-invoices').textContent = live.length;
   $('report-total-profit').textContent = rs(profit);
   $('report-credit-due').textContent = rs(due);
   const status = s => s.status === 'Cancelled' ? 'Cancelled' : (s.returned ? 'Partly Returned' : 'Completed');
-  const pay = s => payLabel(s) + (creditOf(s) > 0 ? (s.creditPaid ? ' (Paid)' : ' (Due)') : '');
+  const pay = s => s.paymentMode + (s.paymentMode === 'Credit' ? (s.creditPaid ? ' (Paid)' : ' (Due)') : '');
   reportData.sales = { title: 'Sales Report', summary: `Net sales ${rs(net)} | Profit ${rs(profit)} | Credit due ${rs(due)}`,
     headers: ['Invoice#', 'Date', 'Customer', 'Phone', 'Items', 'Total', 'Returned', 'Net', 'Payment', 'Status'],
     rows: list.map(s => [s.invoiceNo, fmtDate(s.date), s.customerName || '', s.customerPhone || '', s.items.length, +s.total.toFixed(2), +(s.returned || 0).toFixed(2), +saleNet(s).toFixed(2), pay(s), status(s)]) };
@@ -1725,7 +1644,7 @@ function renderSalesReport() {
       <td><button class="link-btn" onclick="viewSale('${s.id}')">View</button>${c ? '' : `
         <button class="link-btn" onclick="editSale('${s.id}')">Edit</button>
         <button class="link-btn" onclick="returnSale('${s.id}')">Return</button>
-        ${creditOf(s) > 0 && !s.creditPaid ? `<button class="link-btn" onclick="payCredit('${s.id}')">Mark Paid</button>` : ''}
+        ${s.paymentMode === 'Credit' && !s.creditPaid ? `<button class="link-btn" onclick="payCredit('${s.id}')">Mark Paid</button>` : ''}
         <button class="link-btn danger" onclick="cancelSale('${s.id}')">Cancel</button>`}
         ${c ? `<button class="link-btn danger" onclick="deleteSale('${s.id}')">Delete</button>` : ''}</td></tr>`;
   }).join('') : `<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:20px;">Kunai sale xaina</td></tr>`;
@@ -1745,22 +1664,20 @@ window.editSale = function (id) {
   showGeneric('Edit ' + s.invoiceNo, `
     <label>Customer Name</label><input id="g-name" value="${esc(s.customerName || '')}">
     <label>Phone</label><input id="g-phone" value="${esc(s.customerPhone || '')}">
-    <label>Payment Mode ${(s.payments || []).length > 1 ? '(split payment — badlina milena)' : ''}</label><select id="g-mode" ${(s.payments || []).length > 1 ? 'disabled' : ''}>${(s.payments || []).length > 1 ? `<option>Split</option>` : ['Cash', 'Card', 'eSewa', 'Fonepay', 'Credit'].map(m => `<option ${m === s.paymentMode ? 'selected' : ''}>${m}</option>`).join('')}</select>
-    <label>Discount Rs. ${s.returned || (s.payments || []).length > 1 ? '(return / split bill ma badlina milena)' : ''}</label><input id="g-disc" type="number" min="0" value="${s.discount}" ${s.returned || (s.payments || []).length > 1 ? 'disabled' : ''}>
+    <label>Payment Mode</label><select id="g-mode">${['Cash', 'Card', 'QR', 'Credit', 'Split'].map(m => `<option ${m === s.paymentMode ? 'selected' : ''}>${m}</option>`).join('')}</select>
+    <label>Discount Rs. ${s.returned ? '(return bhaisakeko bill ma badlina milena)' : ''}</label><input id="g-disc" type="number" min="0" value="${s.discount}" ${s.returned ? 'disabled' : ''}>
     <p class="hint" style="margin-top:10px;">Item / quantity badlina: bill Cancel gari naya bill banaunu hos, ya Return use garnu hos.</p>`,
     [{ label: 'Cancel' }, { label: 'Save', primary: true, onClick: () => {
       const mode = $('g-mode').value, name = val('g-name');
-      if ((mode === 'Credit' || creditOf(s) > 0) && !name) { showToast('Udharo ko lagi customer ko naam chahiyo'); return false; }
+      if (mode === 'Credit' && !name) { showToast('Udharo ko lagi customer ko naam chahiyo'); return false; }
       s.customerName = name; s.customerPhone = val('g-phone');
-      const isSplit = (s.payments || []).length > 1;
-      if (!isSplit && mode !== s.paymentMode) { s.paymentMode = mode; s.creditPaid = false; s.payments = [{ mode, amt: s.total }]; s.creditAmt = mode === 'Credit' ? s.total : 0; s.tendered = undefined; s.change = 0; }
-      if (!s.returned && !isSplit) {
+      if (mode !== s.paymentMode) { s.paymentMode = mode; s.creditPaid = false; }
+      if (!s.returned) {
         const disc = Math.min(Math.max(parseFloat($('g-disc').value) || 0, 0), s.subtotal);
         const cost = s.total - s.vat - s.profit;
         const vg = s.items.filter(i => i.vatable).reduce((a, i) => a + i.qty * i.rate, 0);
         s.discount = disc; s.vat = (s.subtotal ? vg - disc * vg / s.subtotal : 0) * 13 / 113;
-        const raw = s.subtotal - disc; s.total = s.roundOn ? Math.round(raw) : raw; s.roundOff = s.total - raw; s.profit = s.total - s.vat - cost;
-        if (s.payments && s.payments.length === 1) { s.payments[0].amt = s.total; if (s.paymentMode === 'Credit') s.creditAmt = s.total; }
+        s.total = s.subtotal - disc; s.profit = s.total - s.vat - cost;
       }
       s.edited = new Date().toISOString();
       logAct('Sale edit: ' + s.invoiceNo); save(); renderSalesReport(); renderDashboard(); showToast('Bill update bhayo');
@@ -1787,7 +1704,6 @@ window.returnSale = function (id) {
       if (!refund) { showToast('Return qty halnu hos'); return false; }
       s.items.forEach((it, i) => { if (!qtys[i]) return; it.returnedQty = (it.returnedQty || 0) + qtys[i];
         const m = medicines.find(x => x.id === it.medId); if (m) m.qty += qtys[i]; });
-      if (s.pointsEarned && s.total > 0) { const claw = Math.min(Math.floor(s.pointsEarned * refund / s.total), s.pointsEarned - (s.pointsClawed || 0)), c = customers.find(x => x.id === s.customerId); if (c && claw > 0) { c.points = Math.max(0, (c.points || 0) - claw); s.pointsClawed = (s.pointsClawed || 0) + claw; } }
       s.returned = (s.returned || 0) + refund; s.returnedVat = (s.returnedVat || 0) + vatR; s.returnedProfit = (s.returnedProfit || 0) + (refund - vatR - costR);
       logAct(`Sales return: ${s.invoiceNo} ${rs(refund)}`); save(); renderSalesReport(); renderMedicineTable($('medicine-search').value); renderDashboard();
       showToast('Return record bhayo, refund ' + rs(refund));
@@ -1798,8 +1714,6 @@ window.cancelSale = function (id) {
   const s = sales.find(x => x.id === id); if (!s) return;
   if (!confirm(`${s.invoiceNo} cancel garne? Stock wapas jancha, ra yo bill sales total bata hatchha.`)) return;
   s.items.forEach(it => { const m = medicines.find(x => x.id === it.medId); if (m) m.qty += it.qty - (it.returnedQty || 0); });
-  const cc = customers.find(x => x.id === s.customerId);
-  if (cc) cc.points = Math.max(0, (cc.points || 0) - ((s.pointsEarned || 0) - (s.pointsClawed || 0)) + (s.pointsUsed || 0));
   s.status = 'Cancelled'; s.cancelledDate = new Date().toISOString();
   logAct('Sale cancel: ' + s.invoiceNo); save(); renderSalesReport(); renderMedicineTable($('medicine-search').value); renderDashboard();
   showToast('Bill cancel bhayo, stock wapas bhayo');
@@ -1811,8 +1725,47 @@ window.deleteSale = function (id) {
 };
 window.payCredit = function (id) {
   const s = sales.find(x => x.id === id); if (!s) return;
-  if (!confirm(`${s.customerName || 'Customer'} bata ${rs(creditDue(s) || creditOf(s))} paayo (paid mark garne)?`)) return;
+  if (!confirm(`${s.customerName} bata ${rs(saleNet(s))} paayo (paid mark garne)?`)) return;
   s.creditPaid = true; s.paidDate = new Date().toISOString(); logAct('Credit paid: ' + s.invoiceNo); save(); renderSalesReport(); showToast('Paid mark bhayo');
+};
+
+/* ---- sales drafts (hold bill) ---- */
+let resumingSaleDraftId = null;
+$('btn-save-draft').addEventListener('click', () => {
+  if (!cart.length) { showToast('Cart khali xa'); return; }
+  const d = { id: resumingSaleDraftId || uid(), saved: new Date().toISOString(), customerName: val('billing-customer-name'), customerPhone: val('billing-customer-phone'),
+    discount: $('bill-discount').value, discType: $('bill-disc-type').value, mode: $('bill-payment-mode').value, items: cart.map(c => ({ ...c })) };
+  const i = salesDrafts.findIndex(x => x.id === d.id);
+  if (i >= 0) salesDrafts[i] = d; else salesDrafts.push(d);
+  resumingSaleDraftId = null; cart = [];
+  ['billing-customer-name', 'billing-customer-phone'].forEach(id => $(id).value = ''); $('bill-discount').value = 0;
+  save(); updateDraftCounts(); renderCart(); showToast('Bill draft (hold) save bhayo');
+});
+$('btn-drafts').addEventListener('click', showSaleDrafts);
+function showSaleDrafts() {
+  const body = salesDrafts.length ? salesDrafts.map(d => `<div class="alert-item"><span>${new Date(d.saved).toLocaleString()} | ${esc(d.customerName || 'Walk-in')} | ${d.items.length} item | ${rs(d.items.reduce((a, c) => a + c.qty * c.rate, 0))}</span>
+    <span><button class="link-btn" onclick="resumeSaleDraft('${d.id}')">Resume</button><button class="link-btn danger" onclick="deleteSaleDraft('${d.id}')">Delete</button></span></div>`).join('')
+    : '<div class="alert-empty">Kunai draft chaina</div>';
+  showGeneric('Held Bills (Drafts)', `<div class="alert-list">${body}</div>`, [{ label: 'Close' }]);
+}
+window.resumeSaleDraft = function (id) {
+  const d = salesDrafts.find(x => x.id === id); if (!d) return;
+  if (cart.length && !confirm('Abhiko cart replace garne?')) return;
+  let dropped = 0; const items = [];
+  d.items.forEach(it => {
+    const m = medicines.find(x => x.id === it.medId);
+    if (!m || m.qty <= 0 || daysUntil(m.expiry) < 0) { dropped++; return; }
+    items.push({ ...it, rate: m.sellPrice, maxQty: m.qty, qty: Math.min(it.qty, m.qty), vatable: isVatable(m), expiry: m.expiry });
+  });
+  cart = items; resumingSaleDraftId = id;
+  $('billing-customer-name').value = d.customerName || ''; $('billing-customer-phone').value = d.customerPhone || '';
+  $('bill-discount').value = d.discount || 0; $('bill-disc-type').value = d.discType || 'Rs'; $('bill-payment-mode').value = d.mode || 'Cash';
+  closeModal('modal-generic'); renderCart();
+  showToast(dropped ? `${dropped} item stock/expiry ko karan hatayo` : 'Draft cart ma load bhayo');
+};
+window.deleteSaleDraft = function (id) {
+  if (!confirm('Draft delete garne?')) return;
+  salesDrafts = salesDrafts.filter(d => d.id !== id); save(); updateDraftCounts(); showSaleDrafts();
 };
 
 /* ---- purchase / stock / expiry reports ---- */
@@ -1935,7 +1888,7 @@ $('import-file').addEventListener('change', async e => {
 });
 
 $('btn-backup').addEventListener('click', () => {
-  downloadBlob(new Blob([JSON.stringify({ app: 'pharmacy-os', version: 2, exported: new Date().toISOString(), medicines, suppliers, sales, purchases, settings, salesDrafts, purchaseDrafts, activityLog, categories, brands, units, stockLog, customers })], { type: 'application/json' }), 'pharmacy_backup_' + todayISO() + '.json');
+  downloadBlob(new Blob([JSON.stringify({ app: 'pharmacy-os', version: 2, exported: new Date().toISOString(), medicines, suppliers, sales, purchases, settings, salesDrafts, purchaseDrafts, activityLog, categories, brands, units, stockLog })], { type: 'application/json' }), 'pharmacy_backup_' + todayISO() + '.json');
   showToast('Backup download bhayo');
 });
 $('btn-restore').addEventListener('click', () => $('restore-file').click());
@@ -1946,7 +1899,7 @@ $('restore-file').addEventListener('change', async e => {
     if (d.app !== 'pharmacy-os' || !Array.isArray(d.medicines) || !Array.isArray(d.sales)) throw new Error('bad');
     if (!confirm(`Restore garda abhiko sabai data replace huncha.\nBackup: ${d.medicines.length} batch, ${d.sales.length} sale. Continue?`)) return;
     medicines = d.medicines; suppliers = d.suppliers || []; sales = d.sales; purchases = d.purchases || []; settings = d.settings || settings;
-    categories = d.categories || categories; brands = d.brands || []; units = d.units || units; stockLog = d.stockLog || []; salesDrafts = d.salesDrafts || []; purchaseDrafts = d.purchaseDrafts || []; activityLog = d.activityLog || []; customers = d.customers || [];
+    categories = d.categories || categories; brands = d.brands || []; units = d.units || units; stockLog = d.stockLog || []; salesDrafts = d.salesDrafts || []; purchaseDrafts = d.purchaseDrafts || []; activityLog = d.activityLog || [];
     save(); location.reload();
   } catch (err) { showToast('Backup file valid xaina'); }
 });
@@ -1973,13 +1926,10 @@ function loadSettingsForm() {
   document.getElementById('set-contact').value = settings.contact || '';
   document.getElementById('set-low-stock-threshold').value = settings.lowStockThreshold;
   document.getElementById('set-expiry-days').value = settings.expiryDays;
-  $('set-loyalty-per').value = settings.loyaltyPer;
-  $('set-loyalty-value').value = settings.loyaltyValue;
 }
 
 document.getElementById('btn-save-settings').addEventListener('click', () => {
   settings = {
-    ...settings,
     name: document.getElementById('set-name').value.trim() || 'Pharmacy',
     address: document.getElementById('set-address').value.trim(),
     dda: document.getElementById('set-dda').value.trim(),
@@ -1987,9 +1937,7 @@ document.getElementById('btn-save-settings').addEventListener('click', () => {
     pan: document.getElementById('set-pan').value.trim(),
     contact: document.getElementById('set-contact').value.trim(),
     lowStockThreshold: parseFloat(document.getElementById('set-low-stock-threshold').value) || 10,
-    expiryDays: parseFloat(document.getElementById('set-expiry-days').value) || 90,
-    loyaltyPer: Math.max(0, parseFloat($('set-loyalty-per').value) || 0),
-    loyaltyValue: Math.max(0, parseFloat($('set-loyalty-value').value) || 1)
+    expiryDays: parseFloat(document.getElementById('set-expiry-days').value) || 90
   };
   save();
   showToast('Settings save bhayo');
@@ -2015,6 +1963,8 @@ seedDemoData();
 populateSupplierDropdown();
 renderDashboard();
 renderMedicineTable();
-migrateCustomers();
-renderPos();
+renderCart();
+renderQuick();
+updateShiftBtn();
+updateDraftCounts();
 renderPurchaseTable();

@@ -209,68 +209,49 @@
 
     <!-- BILLING / POS -->
     <section id="page-billing" class="page">
-      <div class="pos-head">
-        <div class="pos-title"><h1>Billing <span>POS</span></h1><div id="pos-stats" class="pos-stats"></div></div>
+      <div class="pos-top">
+        <div class="sale-tabs" id="sale-tabs"></div>
         <div class="head-actions">
-          <button class="btn" id="btn-last-bill">🧾 Last bill</button>
-          <button class="btn" id="btn-drafts">⏸ Held bills (0) <kbd>F8</kbd></button>
-          <button class="btn" id="btn-save-draft">⏸ Hold <kbd>F4</kbd></button>
-          <button class="btn danger-o" id="btn-clear-cart">✕ Clear</button>
+          <span class="kbd-hint"><kbd>F2</kbd> Scan <kbd>F4</kbd> Pay <kbd>F8</kbd> Hold <kbd>F9</kbd> New</span>
+          <button class="btn sm" id="btn-shift">Open shift</button>
+          <button class="btn sm" id="btn-drafts">Drafts (0)</button>
         </div>
       </div>
 
-      <div class="pos-layout">
-        <!-- LEFT: search + product grid -->
-        <div class="pos-left">
-          <div class="pos-searchbar">
-            <span class="ps-ico">🔍</span>
-            <input type="text" id="billing-search" autocomplete="off" placeholder="Medicine / generic / barcode scan garnu hos…   (5*para = 5 qty)">
-            <kbd>F2</kbd>
-            <div id="billing-search-results" class="search-results"></div>
-          </div>
-          <div id="pos-cats" class="pos-cats"></div>
+      <div class="pos-body">
+        <div class="pos-catalog">
+          <input type="text" id="billing-search" class="search-box pos-search" placeholder="Barcode scan garnu hos ya naam / generic khojnu hos (F2)" autocomplete="off">
+          <div id="billing-search-results" hidden></div>
+          <div id="pos-cats" class="cat-rail"></div>
           <div id="pos-grid" class="pos-grid"></div>
+          <button class="btn full" id="pos-more" style="display:none"></button>
         </div>
 
-        <!-- RIGHT: customer + cart + totals -->
-        <div class="pos-right">
-          <div class="pos-panel">
-            <div class="pos-cust">
-              <div class="pc-row">
-                <input type="text" id="billing-customer-name" list="cust-list" placeholder="👤 Customer naam (walk-in = blank)" autocomplete="off">
-                <input type="tel" id="billing-customer-phone" placeholder="📞 Phone" autocomplete="off">
-              </div>
-              <datalist id="cust-list"></datalist>
-              <div id="cust-info" class="cust-info"></div>
-            </div>
-
-            <div class="cart-head"><b>Cart</b><span id="cart-count">Empty</span></div>
-            <div id="cart-list" class="cart-list"></div>
-
-            <div id="rx-block" class="rx-block" style="display:none">
-              <div class="rx-title">℞ Prescription / Controlled item cart ma xa</div>
-              <div class="pc-row"><input type="text" id="rx-doctor" placeholder="Doctor / prescriber"><input type="text" id="rx-no" placeholder="Rx / reg. no"></div>
-              <label class="check-row"><input type="checkbox" id="rx-verified"> Prescription check gariyo ✔</label>
-            </div>
-
-            <div class="pos-sum">
-              <div class="bill-row"><span>Items total</span><span id="bill-gross">Rs. 0</span></div>
-              <div class="bill-row" id="row-linedisc" style="display:none"><span>Item discounts</span><span id="bill-linedisc" class="neg"></span></div>
-              <div class="bill-row disc-row"><span>Bill discount</span>
-                <span class="disc-in"><select id="bill-disc-type"><option>Rs</option><option>%</option></select><input type="number" id="bill-discount" value="0" min="0" inputmode="decimal"></span></div>
-              <div class="chip-row qd"><button type="button" class="chip-btn" data-qdisc="5">5%</button><button type="button" class="chip-btn" data-qdisc="10">10%</button><button type="button" class="chip-btn" data-qdisc="15">15%</button></div>
-              <div class="bill-row" id="row-points" style="display:none"><span>⭐ Loyalty points</span><span id="bill-points" class="neg"></span></div>
-              <div class="bill-row"><span>VAT 13% (included)</span><span id="bill-vat">Rs. 0</span></div>
-              <div class="bill-row" id="row-round" style="display:none"><span>Round off</span><span id="bill-round"></span></div>
-              <label class="switch-row ro"><input type="checkbox" id="bill-roundoff"> Round off to nearest Rs.</label>
-            </div>
-            <div class="pos-total"><span>Total</span><b id="bill-total">Rs. 0</b></div>
-            <div id="bill-saved" class="bill-saved" style="display:none"></div>
-            <button class="pay-btn" id="btn-complete-sale" disabled><span>Pay</span><b>Rs. 0</b><kbd>F9</kbd></button>
+        <aside class="pos-cart">
+          <button class="cust-chip" id="btn-customer"><span>👤 <b id="cust-label">Walk-in customer</b></span><small id="cust-info"></small></button>
+          <div id="cart-lines" class="cart-lines"></div>
+          <div id="ix-warn" class="ix-warn" style="display:none"></div>
+          <div class="cart-totals">
+            <div class="bill-row"><span>Subtotal</span><span id="bill-subtotal">Rs. 0</span></div>
+            <div class="bill-row"><button class="link-btn" id="btn-discount">+ Discount</button><span id="bill-disc-view">Rs. 0</span></div>
+            <div class="bill-row"><span>VAT 13% (included)</span><span id="bill-vat">Rs. 0</span></div>
+            <div id="bill-saving" class="sub" style="text-align:right"></div>
           </div>
-        </div>
+          <button class="pay-big" id="btn-pay"><span>Pay (F4)</span><b id="bill-total">Rs. 0</b></button>
+          <div class="two-btn"><button class="btn" id="btn-save-draft">Hold (F8)</button><button class="btn" id="btn-clear-cart">Clear</button></div>
+        </aside>
+      </div>
+
+      <div hidden>
+        <input id="billing-customer-name"><input id="billing-customer-phone"><input id="billing-customer-pan">
+        <input type="number" id="bill-discount" value="0"><select id="bill-disc-type"><option>Rs</option><option>%</option></select>
+        <input type="checkbox" id="bill-round" checked>
+        <select id="bill-payment-mode"><option value="Cash">Cash</option><option value="Card">Card</option><option value="QR">QR</option><option value="Credit">Credit</option><option value="Split">Split</option></select>
+        <input id="rx-doctor"><input id="rx-no"><datalist id="cust-list"></datalist>
       </div>
     </section>
+
+    <div id="modal-pay" class="modal-overlay"><div class="modal pay-modal" id="pay-body"></div></div>
 
     <!-- PURCHASE -->
     <section id="page-purchase" class="page">
@@ -326,7 +307,7 @@
         <div class="filter-row">
           <label>From <input type="date" id="sales-from"></label>
           <label>To <input type="date" id="sales-to"></label>
-          <label>Payment <select id="sales-mode"><option value="">All</option><option>Cash</option><option>Card</option><option>eSewa</option><option>Fonepay</option><option>Credit</option><option>Split</option></select></label>
+          <label>Payment <select id="sales-mode"><option value="">All</option><option>Cash</option><option>Card</option><option>QR</option><option>Credit</option><option>Split</option></select></label>
           <label>Status <select id="sales-status"><option value="">All</option><option value="Completed">Completed</option><option value="Cancelled">Cancelled</option></select></label>
           <label>Search <input type="text" id="sales-q" placeholder="invoice / customer / medicine"></label>
         </div>
@@ -411,10 +392,6 @@
         <input type="number" id="set-low-stock-threshold" value="10">
         <label>Near Expiry Alert (days)</label>
         <input type="number" id="set-expiry-days" value="90">
-        <label>Loyalty: 1 point per Rs. (0 = off)</label>
-        <input type="number" id="set-loyalty-per" value="100" min="0">
-        <label>Loyalty: 1 point value (Rs.)</label>
-        <input type="number" id="set-loyalty-value" value="1" min="0" step="0.1">
         <button class="btn primary full" id="btn-save-settings">Save Settings</button>
       </div>
       <div class="panel narrow" style="margin-top:16px;">
@@ -433,8 +410,7 @@
 
 <!-- MEDICINE MODAL -->
 <div id="modal-medicine" class="modal-overlay">
-  <div class="modal wide modal-app">
-    <div class="modal-head">
+  <div class="modal wide">
     <h2 id="medicine-modal-title">Add New Product</h2>
 
     <div class="pv-card">
@@ -442,9 +418,13 @@
       <div class="pv-text"><div id="pv-name" class="pv-name"></div><div id="pv-sub" class="sub"></div></div>
       <div class="pv-right"><div id="pv-price" class="pv-price"></div><div id="pv-margin" class="sub"></div></div>
     </div>
-    </div>
-    <div class="modal-body">
 
+    <div class="mtabs">
+      <button type="button" class="mtab-btn active" data-mtab="general">General</button>
+      <button type="button" class="mtab-btn" data-mtab="pricing">Pricing &amp; Tax</button>
+      <button type="button" class="mtab-btn" data-mtab="pharmacy">Pharmacy</button>
+      <button type="button" class="mtab-btn" data-mtab="stock">Stock &amp; Batch</button>
+    </div>
 
     <div id="mtab-general" class="mtab active">
       <div class="form-grid">
@@ -499,20 +479,11 @@
       </div>
     </div>
 
-    </div>
-
     <div class="modal-actions">
       <button class="btn" id="btn-cancel-medicine">Cancel</button>
       <button class="btn" id="btn-save-add">Save &amp; add another</button>
       <button class="btn primary" id="btn-save-medicine">Save</button>
     </div>
-
-    <nav class="mtabs bottom" aria-label="Product form sections">
-      <button type="button" class="mtab-btn active" data-mtab="general"><span class="mt-ico">📦</span><span class="mt-lbl">General</span></button>
-      <button type="button" class="mtab-btn" data-mtab="pricing"><span class="mt-ico">💰</span><span class="mt-lbl">Pricing &amp; Tax</span></button>
-      <button type="button" class="mtab-btn" data-mtab="pharmacy"><span class="mt-ico">💊</span><span class="mt-lbl">Pharmacy</span></button>
-      <button type="button" class="mtab-btn" data-mtab="stock"><span class="mt-ico">🗃️</span><span class="mt-lbl">Stock &amp; Batch</span></button>
-    </nav>
   </div>
 </div>
 
@@ -567,29 +538,14 @@
   </div>
 </div>
 
-<!-- PAYMENT MODAL -->
-<div id="modal-pay" class="modal-overlay">
-  <div class="modal pay-modal">
-    <h2>Payment</h2>
-    <div class="pay-due"><span>Amount due</span><b id="pay-total">Rs. 0</b></div>
-    <div id="pay-rows"></div>
-    <div class="chip-row" id="pay-add"></div>
-    <div class="chip-row" id="pay-quick"></div>
-    <div id="pay-status" class="pay-status"></div>
-    <div class="modal-actions">
-      <button class="btn" id="btn-pay-cancel">Cancel</button>
-      <button class="btn primary" id="btn-pay-confirm">Complete Sale ↵</button>
-    </div>
-  </div>
-</div>
-
 <!-- INVOICE MODAL -->
 <div id="modal-invoice" class="modal-overlay">
   <div class="modal invoice-modal">
     <div id="invoice-print-area"></div>
     <div class="modal-actions">
       <button class="btn" id="btn-close-invoice">Close</button>
-      <button class="btn wa" id="btn-wa-invoice">WhatsApp</button>
+      <button class="btn" id="btn-copy-receipt">Copy</button>
+      <button class="btn" id="btn-wa-receipt">WhatsApp</button>
       <button class="btn primary" id="btn-print-invoice">Print</button>
     </div>
   </div>
