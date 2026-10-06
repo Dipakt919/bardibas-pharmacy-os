@@ -228,6 +228,14 @@
         </div>
 
         <aside class="pos-cart">
+          <div class="order-card">
+            <div class="order-card-top">
+              <span class="order-tag">ORDER</span>
+              <span class="order-parked">Parked</span>
+            </div>
+            <div class="order-card-total" id="order-card-total">Rs. 0.00</div>
+          </div>
+
           <button class="cust-chip" id="btn-customer"><span>👤 <b id="cust-label">Walk-in customer</b></span><small id="cust-info"></small></button>
           <div id="cart-lines" class="cart-lines"></div>
           <div id="ix-warn" class="ix-warn" style="display:none"></div>
@@ -237,6 +245,14 @@
             <div class="bill-row"><span>VAT 13% (included)</span><span id="bill-vat">Rs. 0</span></div>
             <div id="bill-saving" class="sub" style="text-align:right"></div>
           </div>
+
+          <div class="pos-action-grid">
+            <button type="button" class="pos-action-btn" onclick="document.getElementById('btn-customer').click()"><span class="pa-icon">👤</span><span class="pa-label">Customer</span></button>
+            <button type="button" class="pos-action-btn" onclick="document.getElementById('btn-discount').click()"><span class="pa-icon">%</span><span class="pa-label">Discount</span></button>
+            <button type="button" class="pos-action-btn" id="pa-note" onclick="showToast('Chaadai aaune feature')"><span class="pa-icon">📝</span><span class="pa-label">Note</span></button>
+            <button type="button" class="pos-action-btn" id="pa-services" onclick="showToast('Chaadai aaune feature')"><span class="pa-icon">🧰</span><span class="pa-label">Services</span></button>
+          </div>
+
           <button class="pay-big" id="btn-pay"><span>Pay (F4)</span><b id="bill-total">Rs. 0</b></button>
           <div class="two-btn"><button class="btn" id="btn-save-draft">Hold (F8)</button><button class="btn" id="btn-clear-cart">Clear</button></div>
         </aside>

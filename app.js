@@ -1185,7 +1185,9 @@ function renderGrid() {
     const live = sellableOf(g), ref = live[0], sq = live.reduce((a, b) => a + b.qty, 0);
     const inCart = cart.filter(c => sameName(c.name, g.name)).reduce((a, c) => a + c.qty, 0);
     const near = ref && daysUntil(ref.expiry) <= settings.expiryDays;
+    const stockBadge = !ref ? '<span class="tile-badge out">Out</span>' : (sq <= g.reorder ? '<span class="tile-badge low">Low</span>' : '');
     return `<button class="tile ${ref ? '' : 'out'}" ${ref ? `data-med="${ref.id}"` : 'disabled'}>
+      ${stockBadge}
       ${inCart ? `<em class="in-cart">${inCart}</em>` : ''}${avatarHtml(g.name, g.p.image, 'lg')}
       <div class="t-name">${esc(g.name)}</div>
       <div class="t-price">${ref ? rs(ref.sellPrice) : 'Stock chaina'}</div>
@@ -1291,6 +1293,7 @@ function calcBill() {
 function updateBillSummary() {
   const b = calcBill();
   $('bill-subtotal').textContent = rs(b.subtotal); $('bill-vat').textContent = rs(b.vat); $('bill-total').textContent = rs(b.total);
+  const orderTotalEl = $('order-card-total'); if (orderTotalEl) orderTotalEl.textContent = rs(b.total);
   $('bill-disc-view').textContent = b.discount > 0 ? '- ' + rs(b.discount) : 'Rs. 0';
   $('bill-saving').textContent = b.saved > 0.005 ? 'Customer le bachat: ' + rs(b.saved) : '';
 }
